@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Import <%= imp.id %></title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2rem;
+      color: #1f2937;
+      background: #ffffff;
+    }
+    h1, h2 {
+      margin-bottom: 0.5rem;
+    }
+    p {
+      color: #4b5563;
+    }
+    .top-links {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+    .meta, .summary-grid, .panel {
+      margin-bottom: 1.5rem;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 1rem;
+    }
+    .card, .panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 1rem;
+      background: #fff;
+    }
+    .card strong {
+      display: block;
+      font-size: 1.4rem;
+      color: #111827;
+      margin-bottom: 0.25rem;
+    }
+    .muted {
+      color: #6b7280;
+    }
+    .scroll {
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.75rem;
+      min-width: 700px;
+    }
+    th, td {
+      border: 1px solid #e5e7eb;
+      padding: 0.7rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f3f4f6;
+    }
+    td.num, th.num {
+      text-align: right;
+      white-space: nowrap;
+    }
+    .issue-badge {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 999px;
+      background: #fef3c7;
+      color: #92400e;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+    .ok-empty {
+      color: #6b7280;
+      padding: 0.25rem 0 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="top-links">
+    <a href="/">← Back to dashboard</a>
+    <a href="/expenses/new">Add expense</a>
+    <a href="/sales/new">Record sale</a>
+  </div>
+
+  <h1>Import #<%= imp.id %></h1>
+  <div class="meta">
+    <p>
+      <strong><%= imp.filename %></strong><br />
+      Imported: <%= imp.imported_at %><br />
+      Parsed rows: <%= imp.row_count %>
+    </p>
+  </div>
+
+  <div class="summary-grid">
+    <div class="card">
+      <strong><%= accounts.length %></strong>
+      <span>Account snapshots</span>
+    </div>
+    <div class="card">
+      <strong><%= properties.length %></strong>
+      <span>Properties with transactions</span>
+    </div>
+    <div class="card">
+      <strong><%= propertyValues.length %></strong>
+      <span>Property values</span>
+    </div>
+    <div class="card">
+      <strong><%= issues.length %></strong>
+      <span>Visible issues</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Property rollup</h2>
+    <% if (properties && properties.length) { %>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Property</th>
+              <th class="num">Transactions</th>
+              <th class="num">Income</th>
+              <th class="num">Expenses</th>
+              <th class="num">Net</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% properties.forEach(function(row) { %>
+              <tr>
+                <td><%= row.property_name || '' %></td>
+                <td class="num"><%= row.txn_count ?? '' %></td>
+                <td class="num"><%= row.income_total ?? '' %></td>
+                <td class="num"><%= row.expense_total ?? '' %></td>
+                <td class="num"><%= row.net_total ?? '' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p class="ok-empty">No property transaction rollup is available for this import.</p>
+    <% } %>
+  </div>
+
+  <div class="panel">
+    <h2>Property values</h2>
+    <% if (propertyValues && propertyValues.length) { %>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Address</th>
+              <th class="num">Purchased</th>
+              <th class="num">Estimate</th>
+              <th>Snapshot date</th>
+              <th class="num">Profit/Loss</th>
+              <th class="num">Alt estimate</th>
+              <th>Alt snapshot</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% propertyValues.forEach(function(row) { %>
+              <tr>
+                <td><%= row.address || '' %></td>
+                <td class="num"><%= row.purchased ?? '' %></td>
+                <td class="num"><%= row.estimate ?? '' %></td>
+                <td><%= row.snapshot_date || '' %></td>
+                <td class="num"><%= row.profit_loss ?? '' %></td>
+                <td class="num"><%= row.alt_estimate ?? '' %></td>
+                <td><%= row.alt_snapshot_date || '' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p class="ok-empty">No property valuation rows were imported.</p>
+    <% } %>
+  </div>
+
+  <div class="panel">
+    <h2>Account snapshots</h2>
+    <% if (accounts && accounts.length) { %>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Bank</th>
+              <th>Type</th>
+              <th>Account</th>
+              <th>Routing</th>
+              <th class="num">Balance</th>
+              <th>Sheet</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% accounts.forEach(function(row) { %>
+              <tr>
+                <td><%= row.snapshot_date || '' %></td>
+                <td><%= row.bank || '' %></td>
+                <td><%= row.account_type || '' %></td>
+                <td><%= row.account_num || '' %></td>
+                <td><%= row.routing || '' %></td>
+                <td class="num"><%= row.balance ?? '' %></td>
+                <td><%= row.source_sheet || '' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p class="ok-empty">No account snapshots were imported.</p>
+    <% } %>
+  </div>
+
+  <div class="panel">
+    <h2>Import issues</h2>
+    <% if (issues && issues.length) { %>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Sheet</th>
+              <th>Row</th>
+              <th>Type</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% issues.forEach(function(row) { %>
+              <tr>
+                <td><%= row.sheet_name || '' %></td>
+                <td><%= row.row_number ?? '' %></td>
+                <td><span class="issue-badge"><%= row.issue_type || '' %></span></td>
+                <td><%= row.message || '' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p class="ok-empty">No import issues were recorded for this import.</p>
+    <% } %>
+  </div>
+</body>
+</html>

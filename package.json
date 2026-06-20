@@ -1,0 +1,17 @@
+{
+  "name": "financial-import-mvp",
+  "version": "1.0.0",
+  "description": "Local financial workbook importer",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node app.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "ejs": "^3.1.10",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "xlsx": "^0.18.5"
+  }
+}
