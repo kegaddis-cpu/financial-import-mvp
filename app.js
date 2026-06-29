@@ -424,26 +424,6 @@ app.post('/import', upload.single('financialFile'), (req, res) => {
 app.get('/expenses/new', (req, res) => {
   const latestImportId = getLatestImportId();
 
-  const properties = latestImportId
-    ? db.prepare(`
-        SELECT DISTINCT address AS property_name
-        FROM property_values
-        WHERE import_id = ? AND address IS NOT NULL AND TRIM(address) <> ''
-        ORDER BY address
-      `).all(latestImportId)
-    : [];
-
-  res.render('add-expense', {
-    latestImportId,
-    properties,
-    success: req.query.success || '',
-    error: req.query.error || ''
-  });
-});
-
-app.post('/expenses', (req, res) => {
-  const latestImportId = getLatestImportId();
-
   if (!latestImportId) {
     return res.redirect('/expenses/new?error=' + encodeURIComponent('Please import a workbook before adding expenses.'));
   }
