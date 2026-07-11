@@ -422,18 +422,31 @@ app.post('/import', upload.single('financialFile'), (req, res) => {
 });
 
 app.get('/expenses/new', (req, res) => {
-  const latestImportId = getLatestImportId();
+    const latestImportId = getLatestImportId();
 
-  if (!latestImportId) {
-    return res.redirect('/expenses/new?error=' + encodeURIComponent('Please import a workbook before adding expenses.'));
-  }
+    const properties = latestImportId
+        ? db.prepare(`
+        SELECT property_name
+        FROM (
+          SELECT DISTINCT address AS property_name
+          FROM property_values
+          WHERE import_id = ? AND address IS NOT NULL AND TRIM(address) <> ''
+          UNION
+          SELECT DISTINCT property_name
+          FROM transactions
+          WHERE import_id = ? AND property_name IS NOT NULL AND TRIM(property_name) <> ''
+        )
+        ORDER BY property_name
+      `).all(latestImportId, latestImportId)
+        : [];
 
-  const txnDate = s(req.body.txn_date);
-  const propertyName = s(req.body.property_name);
-  const reason = s(req.body.reason);
-  const amountValue = n(req.body.amount);
-  const category = s(req.body.category);
-
+    res.render('add-expense', {
+        latestImportId,
+        properties,
+        success: req.query.success || '',
+        error: req.query.error || (latestImportId ? '' : 'Please import a workbook before adding expenses.')
+    });
+});
   if (!txnDate || !propertyName || !reason || amountValue == null) {
     return res.redirect('/expenses/new?error=' + encodeURIComponent('Date, property, amount, and reason are required.'));
   }
