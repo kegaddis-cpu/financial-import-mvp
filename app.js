@@ -17,7 +17,7 @@ const db = new Database(path.join(dataDir, 'financials.db'));
 db.pragma('journal_mode = WAL');
 
 function initDb() {
-  db.exec(`
+    db.exec(`
 CREATE TABLE IF NOT EXISTS imports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   filename TEXT NOT NULL,
@@ -83,8 +83,8 @@ CREATE TABLE IF NOT EXISTS import_issues (
 initDb();
 
 const storage = multer.diskStorage({
-  destination: (_, __, cb) => cb(null, uploadsDir),
-  filename: (_, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
+    destination: (_, __, cb) => cb(null, uploadsDir),
+    filename: (_, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
 });
 const upload = multer({ storage });
 
@@ -94,86 +94,86 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 function excelDateToIso(value) {
-  if (value == null || value === '') return null;
-  if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
+    if (value == null || value === '') return null;
+    if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
 
-  if (typeof value === 'number') {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    if (!parsed) return null;
-    const d = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
-    return d.toISOString().slice(0, 10);
-  }
+    if (typeof value === 'number') {
+        const parsed = XLSX.SSF.parse_date_code(value);
+        if (!parsed) return null;
+        const d = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+        return d.toISOString().slice(0, 10);
+    }
 
-  const text = String(value).trim();
-  const d = new Date(text);
-  if (!isNaN(d)) return d.toISOString().slice(0, 10);
-  return text;
+    const text = String(value).trim();
+    const d = new Date(text);
+    if (!isNaN(d)) return d.toISOString().slice(0, 10);
+    return text;
 }
 
 function n(value) {
-  if (value == null || value === '') return null;
-  if (typeof value === 'number' && !Number.isNaN(value)) return value;
+    if (value == null || value === '') return null;
+    if (typeof value === 'number' && !Number.isNaN(value)) return value;
 
-  let text = String(value).trim();
-  if (!text) return null;
+    let text = String(value).trim();
+    if (!text) return null;
 
-  const neg = text.includes('(') && text.includes(')');
-  text = text
-    .replace(/\$/g, '')
-    .replace(/,/g, '')
-    .replace(/\s+/g, '')
-    .replace(/[()]/g, '');
+    const neg = text.includes('(') && text.includes(')');
+    text = text
+        .replace(/\$/g, '')
+        .replace(/,/g, '')
+        .replace(/\s+/g, '')
+        .replace(/[()]/g, '');
 
-  const parsed = Number(text);
-  if (Number.isNaN(parsed)) return null;
+    const parsed = Number(text);
+    if (Number.isNaN(parsed)) return null;
 
-  return neg ? -Math.abs(parsed) : parsed;
+    return neg ? -Math.abs(parsed) : parsed;
 }
 
 function s(value) {
-  if (value == null) return null;
-  const text = String(value).trim();
-  return text === '' ? null : text;
+    if (value == null) return null;
+    const text = String(value).trim();
+    return text === '' ? null : text;
 }
 
 function normalizePropertyName(name) {
-  if (!name) return null;
+    if (!name) return null;
 
-  const raw = String(name).trim();
-  const map = {
-    'The boys': 'The Boys',
-    'The boys ': 'The Boys',
-    'The Boys ': 'The Boys',
-    'Riverview boys': 'The Boys',
-    'Riverview Boys': 'The Boys',
-    'Riverview': 'Carlton Fields Dr',
-    'Riverview ': 'Carlton Fields Dr',
-    'Riverview rental': 'Carlton Fields Dr',
-    'Fishhawk': 'Bridgecrossing Dr',
-    'Fishhawk ': 'Bridgecrossing Dr',
-    'Bridgecrossing': 'Bridgecrossing Dr',
-    'Bridge Crossing': 'Bridgecrossing Dr',
-    'Bloomingdale': 'Brookville Dr',
-    'Blue Plume': 'Blue Plume Ct',
-    'Blue Plume ': 'Blue Plume Ct',
-    'SouthCreek': 'Blue Plume Ct',
-    'SouthCreek ': 'Blue Plume Ct',
-    'Carlton Fields': 'Carlton Fields Dr'
-  };
+    const raw = String(name).trim();
+    const map = {
+        'The boys': 'The Boys',
+        'The boys ': 'The Boys',
+        'The Boys ': 'The Boys',
+        'Riverview boys': 'The Boys',
+        'Riverview Boys': 'The Boys',
+        'Riverview': 'Carlton Fields Dr',
+        'Riverview ': 'Carlton Fields Dr',
+        'Riverview rental': 'Carlton Fields Dr',
+        'Fishhawk': 'Bridgecrossing Dr',
+        'Fishhawk ': 'Bridgecrossing Dr',
+        'Bridgecrossing': 'Bridgecrossing Dr',
+        'Bridge Crossing': 'Bridgecrossing Dr',
+        'Bloomingdale': 'Brookville Dr',
+        'Blue Plume': 'Blue Plume Ct',
+        'Blue Plume ': 'Blue Plume Ct',
+        'SouthCreek': 'Blue Plume Ct',
+        'SouthCreek ': 'Blue Plume Ct',
+        'Carlton Fields': 'Carlton Fields Dr'
+    };
 
-  return map[raw] || raw;
+    return map[raw] || raw;
 }
 
 function detectYearTag(sheetName) {
-  const match = String(sheetName).match(/(20)?(\d{2})$/);
-  if (!match) return null;
+    const match = String(sheetName).match(/(20)?(\d{2})$/);
+    if (!match) return null;
 
-  const yy = Number(match[2]);
-  return yy >= 70 ? 1900 + yy : 2000 + yy;
+    const yy = Number(match[2]);
+    return yy >= 70 ? 1900 + yy : 2000 + yy;
 }
 
 function addIssue(importId, sheet, type, row, payload, message) {
-  db.prepare(`
+    db.prepare(`
     INSERT INTO import_issues (
       import_id, sheet_name, issue_type, row_number, raw_payload, message
     ) VALUES (?, ?, ?, ?, ?, ?)
@@ -181,244 +181,244 @@ function addIssue(importId, sheet, type, row, payload, message) {
 }
 
 function getCanonicalPropertySet(workbook) {
-  const set = new Set();
+    const set = new Set();
 
-  const manual = [
-    'Blue Plume Ct',
-    'Bridgecrossing Dr',
-    'Brookville Dr',
-    'Carlton Fields Dr',
-    'The Boys',
-    'Vistazo',
-    'Sedona'
-  ];
-  manual.forEach(name => set.add(normalizePropertyName(name)));
+    const manual = [
+        'Blue Plume Ct',
+        'Bridgecrossing Dr',
+        'Brookville Dr',
+        'Carlton Fields Dr',
+        'The Boys',
+        'Vistazo',
+        'Sedona'
+    ];
+    manual.forEach(name => set.add(normalizePropertyName(name)));
 
-  const sheetName = workbook.SheetNames.find(name => /^Property Values$/i.test(name));
-  if (!sheetName) return set;
+    const sheetName = workbook.SheetNames.find(name => /^Property Values$/i.test(name));
+    if (!sheetName) return set;
 
-  const ws = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
+    const ws = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
 
-  for (const r of rows) {
-    const raw = s(r['Address '] || r['Address']);
-    const normalized = normalizePropertyName(raw);
-    if (normalized) set.add(normalized);
-  }
+    for (const r of rows) {
+        const raw = s(r['Address '] || r['Address']);
+        const normalized = normalizePropertyName(raw);
+        if (normalized) set.add(normalized);
+    }
 
-  return set;
+    return set;
 }
 
 function sanitizeImportedPropertyName(name, validProperties) {
-  const normalized = normalizePropertyName(name);
-  if (!normalized) return null;
-  return validProperties.has(normalized) ? normalized : null;
+    const normalized = normalizePropertyName(name);
+    if (!normalized) return null;
+    return validProperties.has(normalized) ? normalized : null;
 }
 
 function getLatestImportId() {
-  const latest = db.prepare('SELECT id FROM imports ORDER BY id DESC LIMIT 1').get();
-  return latest ? latest.id : null;
+    const latest = db.prepare('SELECT id FROM imports ORDER BY id DESC LIMIT 1').get();
+    return latest ? latest.id : null;
 }
 
 function importWorkbook(filePath, originalName) {
-  const workbook = XLSX.readFile(filePath, { cellDates: true });
-  const validProperties = getCanonicalPropertySet(workbook);
+    const workbook = XLSX.readFile(filePath, { cellDates: true });
+    const validProperties = getCanonicalPropertySet(workbook);
 
-  const importInfo = db.prepare(`
+    const importInfo = db.prepare(`
     INSERT INTO imports (filename, imported_at, sheet_count, row_count, notes)
     VALUES (?, datetime('now'), ?, ?, ?)
   `).run(originalName, workbook.SheetNames.length, 0, 'Initial import');
 
-  const importId = importInfo.lastInsertRowid;
+    const importId = importInfo.lastInsertRowid;
 
-  const insertAccount = db.prepare(`
+    const insertAccount = db.prepare(`
     INSERT INTO account_snapshots (
       import_id, snapshot_date, bank, account_type, account_num, routing, balance, source_sheet
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const insertTxn = db.prepare(`
+    const insertTxn = db.prepare(`
     INSERT INTO transactions (
       import_id, txn_date, property_name, amount, reason,
       income_amount, expense_amount, year_tag, source_sheet, source_category
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const insertValue = db.prepare(`
+    const insertValue = db.prepare(`
     INSERT INTO property_values (
       import_id, address, purchased, estimate, snapshot_date,
       profit_loss, alt_estimate, alt_snapshot_date
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  let rowCount = 0;
+    let rowCount = 0;
 
-  const ignoredSheets = new Set(['Cleanup Notes']);
+    const ignoredSheets = new Set(['Cleanup Notes']);
 
-  for (const sheetName of workbook.SheetNames) {
-    if (ignoredSheets.has(sheetName)) {
-      continue;
-    }
-
-    const ws = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
-
-    if (/^Accounts$/i.test(sheetName)) {
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
-
-        const rawBalance = r['Balance'] ?? r['Balance '] ?? r['BALANCE'] ?? null;
-
-        if (!r['DATE'] && !r['Bank'] && rawBalance == null) continue;
-        if (!r['Bank'] || r['Bank'] === 'Bank') continue;
-
-        if (!r['Acct type'] && !r['ACCT NUM'] && !r['ROUTING'] && !r['Bank']) continue;
-
-        const balance = n(rawBalance);
-        if (balance == null) {
-          addIssue(
-            importId,
-            sheetName,
-            'invalid_account_balance',
-            i + 2,
-            r,
-            `Balance could not be parsed from value: ${rawBalance}`
-          );
-          continue;
+    for (const sheetName of workbook.SheetNames) {
+        if (ignoredSheets.has(sheetName)) {
+            continue;
         }
 
-        insertAccount.run(
-          importId,
-          excelDateToIso(r['DATE']),
-          s(r['Bank']),
-          s(r['Acct type']),
-          s(r['ACCT NUM']),
-          s(r['ROUTING']),
-          balance,
-          sheetName
-        );
+        const ws = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
 
-        rowCount++;
-      }
-      continue;
-    }
+        if (/^Accounts$/i.test(sheetName)) {
+            for (let i = 0; i < rows.length; i++) {
+                const r = rows[i];
 
-    if (/^Payments\s\d+/i.test(sheetName) || /^Taxes\s\d+/i.test(sheetName)) {
-      const yearTag = detectYearTag(sheetName);
-      const baseCategory = /^Taxes/i.test(sheetName) ? 'taxes' : 'payments';
+                const rawBalance = r['Balance'] ?? r['Balance '] ?? r['BALANCE'] ?? null;
 
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
-        const date = r['Date'] || r['DATE'];
-        const propertyLabel = r['Property '] || r['Property'] || null;
-        let amount = n(r['Amount ']) ?? n(r['Amount']);
-        const reason = r['Reason '] || r['Reason'] || null;
+                if (!r['DATE'] && !r['Bank'] && rawBalance == null) continue;
+                if (!r['Bank'] || r['Bank'] === 'Bank') continue;
 
-        const incomeKey = Object.keys(r).find(k => String(k).startsWith('Income'));
-        const expenseKey = Object.keys(r).find(k => String(k).startsWith('Expenses'));
+                if (!r['Acct type'] && !r['ACCT NUM'] && !r['ROUTING'] && !r['Bank']) continue;
 
-        const income = incomeKey ? n(r[incomeKey]) : null;
-        const expense = expenseKey ? n(r[expenseKey]) : null;
+                const balance = n(rawBalance);
+                if (balance == null) {
+                    addIssue(
+                        importId,
+                        sheetName,
+                        'invalid_account_balance',
+                        i + 2,
+                        r,
+                        `Balance could not be parsed from value: ${rawBalance}`
+                    );
+                    continue;
+                }
 
-        if (!date && !propertyLabel && amount == null && !reason) continue;
+                insertAccount.run(
+                    importId,
+                    excelDateToIso(r['DATE']),
+                    s(r['Bank']),
+                    s(r['Acct type']),
+                    s(r['ACCT NUM']),
+                    s(r['ROUTING']),
+                    balance,
+                    sheetName
+                );
 
-        if (amount == null && income != null) amount = income;
-        if (amount == null && expense != null) amount = expense;
-
-        if (amount == null) {
-          addIssue(importId, sheetName, 'invalid_transaction_amount', i + 2, r, 'Amount could not be parsed');
-          continue;
+                rowCount++;
+            }
+            continue;
         }
 
-        const safeProperty = sanitizeImportedPropertyName(propertyLabel, validProperties);
+        if (/^Payments\s\d+/i.test(sheetName) || /^Taxes\s\d+/i.test(sheetName)) {
+            const yearTag = detectYearTag(sheetName);
+            const baseCategory = /^Taxes/i.test(sheetName) ? 'taxes' : 'payments';
 
-        let categoryLabel = baseCategory;
-        const nonPropertySet = new Set(['Taxes', 'All', 'Expense', 'Charity', 'Vacation', 'Boca', 'Singer', 'Busch G']);
+            for (let i = 0; i < rows.length; i++) {
+                const r = rows[i];
+                const date = r['Date'] || r['DATE'];
+                const propertyLabel = r['Property '] || r['Property'] || null;
+                let amount = n(r['Amount ']) ?? n(r['Amount']);
+                const reason = r['Reason '] || r['Reason'] || null;
 
-        if (propertyLabel && !safeProperty) {
-          const trimmed = String(propertyLabel).trim();
-          if (nonPropertySet.has(trimmed)) {
-            categoryLabel = trimmed;
-          } else {
-            addIssue(
-              importId,
-              sheetName,
-              'unmatched_property_name',
-              i + 2,
-              r,
-              `Ignored non-portfolio property label: ${propertyLabel}`
-            );
-          }
+                const incomeKey = Object.keys(r).find(k => String(k).startsWith('Income'));
+                const expenseKey = Object.keys(r).find(k => String(k).startsWith('Expenses'));
+
+                const income = incomeKey ? n(r[incomeKey]) : null;
+                const expense = expenseKey ? n(r[expenseKey]) : null;
+
+                if (!date && !propertyLabel && amount == null && !reason) continue;
+
+                if (amount == null && income != null) amount = income;
+                if (amount == null && expense != null) amount = expense;
+
+                if (amount == null) {
+                    addIssue(importId, sheetName, 'invalid_transaction_amount', i + 2, r, 'Amount could not be parsed');
+                    continue;
+                }
+
+                const safeProperty = sanitizeImportedPropertyName(propertyLabel, validProperties);
+
+                let categoryLabel = baseCategory;
+                const nonPropertySet = new Set(['Taxes', 'All', 'Expense', 'Charity', 'Vacation', 'Boca', 'Singer', 'Busch G']);
+
+                if (propertyLabel && !safeProperty) {
+                    const trimmed = String(propertyLabel).trim();
+                    if (nonPropertySet.has(trimmed)) {
+                        categoryLabel = trimmed;
+                    } else {
+                        addIssue(
+                            importId,
+                            sheetName,
+                            'unmatched_property_name',
+                            i + 2,
+                            r,
+                            `Ignored non-portfolio property label: ${propertyLabel}`
+                        );
+                    }
+                }
+
+                insertTxn.run(
+                    importId,
+                    excelDateToIso(date),
+                    safeProperty,
+                    amount,
+                    s(reason),
+                    income,
+                    expense,
+                    yearTag,
+                    sheetName,
+                    categoryLabel
+                );
+
+                rowCount++;
+            }
+            continue;
         }
 
-        insertTxn.run(
-          importId,
-          excelDateToIso(date),
-          safeProperty,
-          amount,
-          s(reason),
-          income,
-          expense,
-          yearTag,
-          sheetName,
-          categoryLabel
-        );
+        if (/^Property Values$/i.test(sheetName)) {
+            for (let i = 0; i < rows.length; i++) {
+                const r = rows[i];
+                if (!r['Address '] && !r['Purchased '] && !r['Estimate ']) continue;
 
-        rowCount++;
-      }
-      continue;
+                insertValue.run(
+                    importId,
+                    normalizePropertyName(s(r['Address '] || r['Address'])),
+                    n(r['Purchased ']),
+                    n(r['Estimate ']),
+                    excelDateToIso(r['Unnamed: 3']),
+                    n(r['Profit/Loss']),
+                    n(r['Unnamed: 5']),
+                    excelDateToIso(r['Unnamed: 6'])
+                );
+
+                rowCount++;
+            }
+            continue;
+        }
+
+        addIssue(importId, sheetName, 'unmapped_sheet', null, null, `Sheet "${sheetName}" was not imported.`);
     }
 
-    if (/^Property Values$/i.test(sheetName)) {
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
-        if (!r['Address '] && !r['Purchased '] && !r['Estimate ']) continue;
-
-        insertValue.run(
-          importId,
-          normalizePropertyName(s(r['Address '] || r['Address'])),
-          n(r['Purchased ']),
-          n(r['Estimate ']),
-          excelDateToIso(r['Unnamed: 3']),
-          n(r['Profit/Loss']),
-          n(r['Unnamed: 5']),
-          excelDateToIso(r['Unnamed: 6'])
-        );
-
-        rowCount++;
-      }
-      continue;
-    }
-
-    addIssue(importId, sheetName, 'unmapped_sheet', null, null, `Sheet "${sheetName}" was not imported.`);
-  }
-
-  db.prepare('UPDATE imports SET row_count = ? WHERE id = ?').run(rowCount, importId);
-  return importId;
+    db.prepare('UPDATE imports SET row_count = ? WHERE id = ?').run(rowCount, importId);
+    return importId;
 }
 
 app.get('/', (req, res) => {
-  const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
+    const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
 
-  const stats = latestImport
-    ? {
-        accounts: db.prepare('SELECT COUNT(*) AS c FROM account_snapshots WHERE import_id = ?').get(latestImport.id).c,
-        transactions: db.prepare('SELECT COUNT(*) AS c FROM transactions WHERE import_id = ?').get(latestImport.id).c,
-        properties: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
-        values: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
-        issues: db.prepare('SELECT COUNT(*) AS c FROM import_issues WHERE import_id = ?').get(latestImport.id).c
-      }
-    : null;
+    const stats = latestImport
+        ? {
+            accounts: db.prepare('SELECT COUNT(*) AS c FROM account_snapshots WHERE import_id = ?').get(latestImport.id).c,
+            transactions: db.prepare('SELECT COUNT(*) AS c FROM transactions WHERE import_id = ?').get(latestImport.id).c,
+            properties: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
+            values: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
+            issues: db.prepare('SELECT COUNT(*) AS c FROM import_issues WHERE import_id = ?').get(latestImport.id).c
+        }
+        : null;
 
-  const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 10').all();
-  res.render('index', { latestImport, stats, recentImports });
+    const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 10').all();
+    res.render('index', { latestImport, stats, recentImports });
 });
 
 app.post('/import', upload.single('financialFile'), (req, res) => {
-  if (!req.file) return res.status(400).send('No file uploaded');
+    if (!req.file) return res.status(400).send('No file uploaded');
 
-  const importId = importWorkbook(req.file.path, req.file.originalname);
-  res.redirect(`/imports/${importId}`);
+    const importId = importWorkbook(req.file.path, req.file.originalname);
+    res.redirect(`/imports/${importId}`);
 });
 
 app.get('/expenses/new', (req, res) => {
@@ -447,102 +447,116 @@ app.get('/expenses/new', (req, res) => {
         error: req.query.error || (latestImportId ? '' : 'Please import a workbook before adding expenses.')
     });
 });
-  if (!txnDate || !propertyName || !reason || amountValue == null) {
-    return res.redirect('/expenses/new?error=' + encodeURIComponent('Date, property, amount, and reason are required.'));
-  }
 
-  const expenseAmount = Math.abs(amountValue);
+app.post('/expenses', (req, res) => {
+    const latestImportId = getLatestImportId();
 
-  db.prepare(`
+    if (!latestImportId) {
+        return res.redirect('/expenses/new?error=' + encodeURIComponent('Please import a workbook before adding expenses.'));
+    }
+
+    const txnDate = s(req.body.txn_date);
+    const propertyName = s(req.body.property_name);
+    const amountValue = n(req.body.amount);
+    const reason = s(req.body.reason);
+    const category = s(req.body.category);
+
+    if (!txnDate || !propertyName || !reason || amountValue == null) {
+        return res.redirect('/expenses/new?error=' + encodeURIComponent('Date, property, amount, and reason are required.'));
+    }
+
+    const expenseAmount = Math.abs(amountValue);
+
+    db.prepare(`
     INSERT INTO transactions (
       import_id, txn_date, property_name, amount, reason,
       income_amount, expense_amount, year_tag, source_sheet, source_category
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    latestImportId,
-    txnDate,
-    normalizePropertyName(propertyName),
-    -expenseAmount,
-    reason,
-    null,
-    expenseAmount,
-    null,
-    'Manual Entry',
-    category || 'manual-expense'
-  );
+        latestImportId,
+        txnDate,
+        normalizePropertyName(propertyName),
+        -expenseAmount,
+        reason,
+        null,
+        expenseAmount,
+        null,
+        'Manual Entry',
+        category || 'manual-expense'
+    );
 
-  res.redirect('/expenses/new?success=' + encodeURIComponent('Expense saved.'));
+    res.redirect('/expenses/new?success=' + encodeURIComponent('Expense saved.'));
 });
 
 app.get('/sales/new', (req, res) => {
-  const latestImportId = getLatestImportId();
+    const latestImportId = getLatestImportId();
 
-  const properties = latestImportId
-    ? db.prepare(`
+    const properties = latestImportId
+        ? db.prepare(`
         SELECT DISTINCT address AS property_name
         FROM property_values
         WHERE import_id = ? AND address IS NOT NULL AND TRIM(address) <> ''
         ORDER BY address
       `).all(latestImportId)
-    : [];
+        : [];
 
-  res.render('add-sale', {
-    properties,
-    success: req.query.success || '',
-    error: req.query.error || ''
-  });
+    res.render('add-sale', {
+        properties,
+        success: req.query.success || '',
+        error: req.query.error || ''
+    });
 });
 
 app.post('/sales', (req, res) => {
-  const latestImportId = getLatestImportId();
+    const latestImportId = getLatestImportId();
 
-  if (!latestImportId) {
-    return res.redirect('/sales/new?error=' + encodeURIComponent('Please import a workbook before recording a sale.'));
-  }
+    if (!latestImportId) {
+        return res.redirect('/sales/new?error=' + encodeURIComponent('Please import a workbook before recording a sale.'));
+    }
 
-  const txnDate = s(req.body.txn_date);
-  const propertyName = s(req.body.property_name);
-  const salePrice = n(req.body.sale_price);
-  const reason = s(req.body.reason) || 'Property sale';
+    const txnDate = s(req.body.txn_date);
+    const propertyName = s(req.body.property_name);
+    const salePrice = n(req.body.sale_price);
+    const reason = s(req.body.reason) || 'Property sale';
 
-  if (!txnDate || !propertyName || salePrice == null) {
-    return res.redirect('/sales/new?error=' + encodeURIComponent('Sale date, property, and sale price are required.'));
-  }
+    if (!txnDate || !propertyName || salePrice == null) {
+        return res.redirect('/sales/new?error=' + encodeURIComponent('Sale date, property, and sale price are required.'));
+    }
 
-  db.prepare(`
+    db.prepare(`
     INSERT INTO transactions (
       import_id, txn_date, property_name, amount, reason,
       income_amount, expense_amount, year_tag, source_sheet, source_category
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    latestImportId,
-    txnDate,
-    normalizePropertyName(propertyName),
-    salePrice,
-    reason,
-    salePrice,
-    null,
-    null,
-    'Manual Sale',
-    'manual-sale'
-  );
+        latestImportId,
+        txnDate,
+        normalizePropertyName(propertyName),
+        salePrice,
+        reason,
+        salePrice,
+        null,
+        null,
+        'Manual Sale',
+        'manual-sale'
+    );
 
-  res.redirect('/sales/new?success=' + encodeURIComponent('Sale saved.'));
+    res.redirect('/sales/new?success=' + encodeURIComponent('Sale saved.'));
 });
 
 app.get('/imports/:id', (req, res) => {
-  const importId = Number(req.params.id);
-  const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(importId);
+    const importId = Number(req.params.id);
+    const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(importId);
 
-  if (!imp) return res.status(404).send('Import not found');
+    if (!imp) return res.status(404).send('Import not found');
 
-  const accounts = db.prepare(`
+    const accounts = db.prepare(`
     SELECT * FROM account_snapshots
     WHERE import_id = ?
     ORDER BY snapshot_date DESC, bank
   `).all(importId);
 
-  const properties = db.prepare(`
+    const properties = db.prepare(`
     SELECT
       property_name,
       COUNT(*) AS txn_count,
@@ -555,22 +569,22 @@ app.get('/imports/:id', (req, res) => {
     ORDER BY net_total DESC
   `).all(importId);
 
-  const propertyValues = db.prepare(`
+    const propertyValues = db.prepare(`
     SELECT * FROM property_values
     WHERE import_id = ?
     ORDER BY address
   `).all(importId);
 
-  const issues = db.prepare(`
+    const issues = db.prepare(`
     SELECT * FROM import_issues
     WHERE import_id = ?
     ORDER BY sheet_name, row_number
     LIMIT 100
   `).all(importId);
 
-  res.render('import-detail', { imp, accounts, properties, propertyValues, issues });
+    res.render('import-detail', { imp, accounts, properties, propertyValues, issues });
 });
 
 app.listen(PORT, () => {
-  console.log(`Financial importer running on http://localhost:${PORT}`);
+    console.log(`Financial importer running on http://localhost:${PORT}`);
 });
