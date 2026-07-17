@@ -374,6 +374,40 @@ function isFooterLikeText(row) {
   ].some(x => vals.includes(x));
 }
 
+function isGarbageOrSummaryPaymentsRow(row) {
+  const vals = Object.values(row)
+    .map(v => s(v))
+    .filter(Boolean);
+
+  if (!vals.length) return true;
+
+  const joined = vals.join(' ').toLowerCase();
+  if (joined.includes('errorref!')) return true;
+  if (joined.includes('title payments')) return true;
+  if (joined.includes('title taxes')) return true;
+  if (joined.includes('revenue amount')) return true;
+  if (joined.includes('expenses')) return true;
+  if (joined.includes('monthly yearly')) return true;
+  if (joined.includes('nov 30 taxes')) return true;
+  if (joined.includes('save monthly')) return true;
+  if (joined.includes('weekly salary')) return true;
+  if (joined.includes('weekly car insurance')) return true;
+  if (joined.includes('weekly phone')) return true;
+  if (joined.includes('weekly water')) return true;
+  if (joined.includes('weekly electric gas')) return true;
+  if (joined.includes('weekly internet')) return true;
+  if (joined.includes('weekly rental profit')) return true;
+  if (joined.includes('weekly total')) return true;
+  if (joined.includes('total monthly expenses')) return true;
+  if (joined.includes('total monthly income')) return true;
+  if (joined.includes('years to pay back down payment')) return true;
+  if (joined.includes('without pods')) return true;
+  if (joined.includes('without riverview rent')) return true;
+  if (/^(income|expenses|total)$/i.test(vals[0] || '')) return true;
+
+  return false;
+}
+
 function getLatestImportId() {
   const latest = db.prepare('SELECT id FROM imports ORDER BY id DESC LIMIT 1').get();
   return latest ? latest.id : null;
@@ -455,6 +489,7 @@ function importWorkbook(filePath, originalName) {
         if (isProbablySummaryRow(r)) continue;
         if (/^Payments\s*21$/i.test(sheetName) && shouldSkipPayments21Row(r)) continue;
         if (isFooterLikeText(r)) continue;
+        if (isGarbageOrSummaryPaymentsRow(r)) continue;
 
         const rawDate = r['Date'] ?? r['DATE'];
         const rawProperty = s(r['Property '] || r['Property']);
