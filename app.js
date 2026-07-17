@@ -16,6 +16,22 @@ fs.mkdirSync(uploadsDir, { recursive: true });
 const db = new Database(path.join(dataDir, 'financials.db'));
 db.pragma('journal_mode = WAL');
 
+const currencyFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
+function formatCurrency(value) {
+  if (value == null || value === '') return '—';
+  const num = typeof value === 'number' ? value : Number(value);
+  if (Number.isNaN(num)) return '—';
+  return currencyFormatter.format(num);
+}
+
+app.locals.formatCurrency = formatCurrency;
+
 function initDb() {
   db.exec(`
 CREATE TABLE IF NOT EXISTS imports (
@@ -107,6 +123,15 @@ function excelDateToIso(value) {
   const text = String(value).trim();
   const d = new Date(text);
   if (!isNaN(d)) return d.toISOString().slice(0, 10);
+
+  if (/^\d{5}$/.test(text)) {
+    const parsed = XLSX.SSF.parse_date_code(Number(text));
+    if (parsed) {
+      const dd = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+      return dd.toISOString().slice(0, 10);
+    }
+  }
+
   return text || null;
 }
 
@@ -221,7 +246,7 @@ function getCanonicalPropertySet(workbook) {
   for (const r of rows) {
     const raw = s(r['Address '] || r['Address']);
     const normalized = normalizePropertyName(raw);
-    if (normalized) set.add(normalized);
+    if (normalized) set.add(normalizePropertyName(raw));
   }
 
   return set;
@@ -266,7 +291,7 @@ function isNonPortfolioCategory(value) {
   const nonPortfolio = new Set([
     'charity', 'insurance', 'income', 'taxes', 'tax', 'all', 'expense',
     'expenses', 'vacation', 'music', 'car', 'ethan', 'chlo', 'chloë',
-    'busch g', 'boca', 'fun', 'income ', 'personal', 'health'
+    'busch g', 'boca', 'fun', 'personal', 'health'
   ]);
 
   return nonPortfolio.has(v);
@@ -301,6 +326,52 @@ function isProbablySummaryRow(row) {
   if (property && isSummaryReason(property)) return true;
   if (reason && isSummaryReason(reason)) return true;
   return false;
+}
+
+function shouldSkipPayments21Row(row) {
+  const date = s(row['Date'] || row['DATE']);
+  const reason = s(row['Reason'] || row['Reason ']);
+  const amount = n(row['Amount'] || row['Amount ']);
+  const combined = [date, reason].filter(Boolean).join(' ').toLowerCase();
+
+  if (combined.includes('nov 30 taxes')) return true;
+  if (combined.includes('revenue')) return true;
+  if (combined.includes('expenses')) return true;
+  if (combined.includes('total monthly')) return true;
+  if (combined.includes('weekly rental profit')) return true;
+  if (combined.includes('weekly salary')) return true;
+  if (combined.includes('save monthly')) return true;
+  if (combined.includes('monthly yearly')) return true;
+  if (!date && amount == null && !reason) return true;
+  return false;
+}
+
+function hasExplicitZeroLedger(row) {
+  const incomeKey = Object.keys(row).find(k => String(k).trim().startsWith('Income'));
+  const expenseKey = Object.keys(row).find(k => String(k).trim().startsWith('Expenses'));
+  const income = incomeKey ? n(row[incomeKey]) : null;
+  const expense = expenseKey ? n(row[expenseKey]) : null;
+  return income === 0 || expense === 0;
+}
+
+function isFooterLikeText(row) {
+  const vals = Object.values(row)
+    .map(v => s(v)?.toLowerCase())
+    .filter(Boolean)
+    .join(' | ');
+
+  return [
+    'monthly',
+    'loan payment',
+    'without pods',
+    'without riverview rent',
+    'years to pay back down payment',
+    'weekly rental profit',
+    'weekly total',
+    'total monthly expenses',
+    'total monthly income',
+    'save monthly for property taxes insurance'
+  ].some(x => vals.includes(x));
 }
 
 function getLatestImportId() {
@@ -348,20 +419,21 @@ function importWorkbook(filePath, originalName) {
     if (/^Accounts$/i.test(sheetName)) {
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
-        if (!r['DATE'] && !r['Bank'] && !r['Balance']) continue;
-        if (!r['Bank'] || String(r['Bank']).trim() === 'Bank') continue;
-
+        const rawDate = r['DATE'];
+        const bank = s(r['Bank']);
+        const acctType = s(r['Acct type']);
         const balance = n(r['Balance']);
-        if (balance == null) {
-          addIssue(importId, sheetName, 'invalid_account_balance', i + 2, r, 'Balance could not be parsed');
-          continue;
-        }
+
+        const hasUsefulAccountData = bank || acctType || balance != null || rawDate;
+        if (!hasUsefulAccountData) continue;
+        if (!bank || /^bank$/i.test(bank) || /^title$/i.test(bank)) continue;
+        if (balance == null) continue;
 
         insertAccount.run(
           importId,
-          excelDateToIso(r['DATE']),
-          s(r['Bank']),
-          s(r['Acct type']),
+          excelDateToIso(rawDate),
+          bank,
+          acctType,
           s(r['ACCT NUM']),
           s(r['ROUTING']),
           balance,
@@ -381,6 +453,8 @@ function importWorkbook(filePath, originalName) {
         const rowNum = i + 2;
 
         if (isProbablySummaryRow(r)) continue;
+        if (/^Payments\s*21$/i.test(sheetName) && shouldSkipPayments21Row(r)) continue;
+        if (isFooterLikeText(r)) continue;
 
         const rawDate = r['Date'] ?? r['DATE'];
         const rawProperty = s(r['Property '] || r['Property']);
@@ -396,7 +470,6 @@ function importWorkbook(filePath, originalName) {
           excelDateToIso(rawDate) || rawProperty || rawReason || income != null || expense != null || amount != null;
 
         if (!looksLikeTransaction) continue;
-
         if (rawProperty && isNonPortfolioCategory(rawProperty)) continue;
 
         let propertyName = sanitizeImportedPropertyName(rawProperty, validProperties);
@@ -417,6 +490,7 @@ function importWorkbook(filePath, originalName) {
         }
 
         if (amount == null) {
+          if (hasExplicitZeroLedger(r)) continue;
           addIssue(importId, sheetName, 'invalid_transaction_amount', rowNum, r, 'Amount could not be parsed');
           continue;
         }
@@ -442,8 +516,8 @@ function importWorkbook(filePath, originalName) {
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
         const address = s(r['Address '] || r['Address']);
-        const purchased = n(r['Purchased ' ] ?? r['Purchased']);
-        const estimate = n(r['Estimate ' ] ?? r['Estimate']);
+        const purchased = n(r['Purchased '] ?? r['Purchased']);
+        const estimate = n(r['Estimate '] ?? r['Estimate']);
 
         if (!address && purchased == null && estimate == null) continue;
         if (!address) continue;
@@ -492,7 +566,7 @@ app.get('/', (req, res) => {
   } : null;
 
   const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 10').all();
-  res.render('index', { latestImport, stats, recentImports });
+  res.render('index', { latestImport, stats, recentImports, formatCurrency });
 });
 
 app.get('/import', (req, res) => {
@@ -553,7 +627,8 @@ app.get('/imports/:id', (req, res) => {
     accounts,
     properties,
     propertyValues,
-    issues
+    issues,
+    formatCurrency
   });
 });
 
