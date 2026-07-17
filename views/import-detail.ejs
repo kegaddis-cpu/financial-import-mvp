@@ -141,9 +141,9 @@
               <tr>
                 <td><%= row.property_name || '' %></td>
                 <td class="num"><%= row.txn_count ?? '' %></td>
-                <td class="num"><%= row.income_total ?? '' %></td>
-                <td class="num"><%= row.expense_total ?? '' %></td>
-                <td class="num"><%= row.net_total ?? '' %></td>
+                <td class="num"><%= formatCurrency(row.income_total) %></td>
+                <td class="num"><%= formatCurrency(row.expense_total) %></td>
+                <td class="num"><%= formatCurrency(row.net_total) %></td>
               </tr>
             <% }) %>
           </tbody>
@@ -174,11 +174,11 @@
             <% propertyValues.forEach(function(row) { %>
               <tr>
                 <td><%= row.address || '' %></td>
-                <td class="num"><%= row.purchased ?? '' %></td>
-                <td class="num"><%= row.estimate ?? '' %></td>
+                <td class="num"><%= formatCurrency(row.purchased) %></td>
+                <td class="num"><%= formatCurrency(row.estimate) %></td>
                 <td><%= row.snapshot_date || '' %></td>
-                <td class="num"><%= row.profit_loss ?? '' %></td>
-                <td class="num"><%= row.alt_estimate ?? '' %></td>
+                <td class="num"><%= formatCurrency(row.profit_loss) %></td>
+                <td class="num"><%= formatCurrency(row.alt_estimate) %></td>
                 <td><%= row.alt_snapshot_date || '' %></td>
               </tr>
             <% }) %>
@@ -214,7 +214,7 @@
                 <td><%= row.account_type || '' %></td>
                 <td><%= row.account_num || '' %></td>
                 <td><%= row.routing || '' %></td>
-                <td class="num"><%= row.balance ?? '' %></td>
+                <td class="num"><%= formatCurrency(row.balance) %></td>
                 <td><%= row.source_sheet || '' %></td>
               </tr>
             <% }) %>
