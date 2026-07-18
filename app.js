@@ -611,3 +611,45 @@ function importWorkbook(filePath, originalName) {
         if (isProbablySummaryRow(r)) continue;
         if (/^Payments\s*21$/i.test(sheetName) && shouldSkipPayments21Row(r)) continue;
         if (isFooterLikeText(r)) cont
+app.get('/api/latest-summary', (req, res) => {
+  const importId = getLatestImportId();
+  if (!importId) return res.json({ ok: true, summary: null });
+
+  const summary = db.prepare(`
+    SELECT
+      property_name,
+      ROUND(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 2) AS income,
+      ROUND(ABS(SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END)), 2) AS expenses,
+      ROUND(SUM(amount), 2) AS net
+    FROM transactions
+    WHERE import_id = ? AND property_name IS NOT NULL
+    GROUP BY property_name
+    ORDER BY property_name
+  `).all(importId);
+
+  res.json({ ok: true, importId, summary });
+});
+
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+
+  if (err instanceof multer.MulterError) {
+    return res.status(400).send(`Upload failed: ${err.message}`);
+  }
+
+  const message = err?.message || 'Internal Server Error';
+
+  if (
+    /missing required sheet|workbook appears to be empty|excel workbook could not be read|only \.xlsx or \.xls|unsupported file type|missing year sheets/i.test(message)
+  ) {
+    return res.status(400).send(`Import failed: ${message}`);
+  }
+
+  return res.status(500).send(`Import failed: ${message}`);
+});
+
+app.listen(PORT, () => {
+  console.log(`Financial importer running on http://localhost:${PORT}`);
+});
+
+        
