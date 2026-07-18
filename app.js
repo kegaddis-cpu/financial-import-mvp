@@ -32,6 +32,20 @@ function formatCurrency(value) {
 
 app.locals.formatCurrency = formatCurrency;
 
+function columnExists(tableName, columnName) {
+  const cols = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  return cols.some(col => col.name === columnName);
+}
+
+function ensureColumn(tableName, columnSql) {
+  const match = columnSql.match(/^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s+/);
+  if (!match) return;
+  const columnName = match[1];
+  if (!columnExists(tableName, columnName)) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnSql}`);
+  }
+}
+
 function initDb() {
   db.exec(`
 CREATE TABLE IF NOT EXISTS imports (
@@ -95,6 +109,11 @@ CREATE TABLE IF NOT EXISTS import_issues (
   FOREIGN KEY(import_id) REFERENCES imports(id)
 );
 `);
+
+  ensureColumn('import_issues', `status TEXT DEFAULT 'open'`);
+  ensureColumn('import_issues', `resolution_type TEXT`);
+  ensureColumn('import_issues', `resolution_payload TEXT`);
+  ensureColumn('import_issues', `resolved_at TEXT`);
 }
 initDb();
 
@@ -218,8 +237,8 @@ function detectYearTag(sheetName) {
 function addIssue(importId, sheet, type, row, payload, message) {
   db.prepare(`
     INSERT INTO import_issues (
-      import_id, sheet_name, issue_type, row_number, raw_payload, message
-    ) VALUES (?, ?, ?, ?, ?, ?)
+      import_id, sheet_name, issue_type, row_number, raw_payload, message, status
+    ) VALUES (?, ?, ?, ?, ?, ?, 'open')
   `).run(importId, sheet, type, row, JSON.stringify(payload ?? {}), message);
 }
 
@@ -246,10 +265,43 @@ function getCanonicalPropertySet(workbook) {
   for (const r of rows) {
     const raw = s(r['Address '] || r['Address']);
     const normalized = normalizePropertyName(raw);
-    if (normalized) set.add(normalizePropertyName(raw));
+    if (normalized) set.add(normalized);
   }
 
   return set;
+}
+
+function getCanonicalPropertyList(importId = null) {
+  const set = new Set([
+    'Blue Plume Ct',
+    'Bridgecrossing Dr',
+    'Brookville Dr',
+    'Carlton Fields Dr',
+    'The Boys',
+    'Vistazo',
+    'Sedona',
+    'Singer'
+  ]);
+
+  const txnRows = importId
+    ? db.prepare(`SELECT DISTINCT property_name FROM transactions WHERE import_id = ? AND property_name IS NOT NULL`).all(importId)
+    : db.prepare(`SELECT DISTINCT property_name FROM transactions WHERE property_name IS NOT NULL`).all();
+
+  const valueRows = importId
+    ? db.prepare(`SELECT DISTINCT address FROM property_values WHERE import_id = ? AND address IS NOT NULL`).all(importId)
+    : db.prepare(`SELECT DISTINCT address FROM property_values WHERE address IS NOT NULL`).all();
+
+  txnRows.forEach(r => {
+    const normalized = normalizePropertyName(r.property_name);
+    if (normalized) set.add(normalized);
+  });
+
+  valueRows.forEach(r => {
+    const normalized = normalizePropertyName(r.address);
+    if (normalized) set.add(normalized);
+  });
+
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
 
 function sanitizeImportedPropertyName(name, validProperties) {
@@ -589,6 +641,120 @@ function importWorkbook(filePath, originalName) {
   return importId;
 }
 
+function markIssueResolved(issueId, resolutionType, resolutionPayload) {
+  db.prepare(`
+    UPDATE import_issues
+    SET
+      status = 'resolved',
+      resolution_type = ?,
+      resolution_payload = ?,
+      resolved_at = datetime('now')
+    WHERE id = ?
+  `).run(resolutionType, JSON.stringify(resolutionPayload ?? {}), issueId);
+}
+
+function markIssueIgnored(issueId, reason) {
+  db.prepare(`
+    UPDATE import_issues
+    SET
+      status = 'ignored',
+      resolution_type = 'ignored',
+      resolution_payload = ?,
+      resolved_at = datetime('now')
+    WHERE id = ?
+  `).run(JSON.stringify({ reason: reason || null }), issueId);
+}
+
+function replayIssue(issue, formData) {
+  const payload = issue.raw_payload ? JSON.parse(issue.raw_payload) : {};
+  const importId = issue.import_id;
+
+  if (issue.issue_type === 'invalid_transaction_amount') {
+    const correctedAmount = n(formData.corrected_amount);
+    if (correctedAmount == null) {
+      throw new Error('Corrected amount is required');
+    }
+
+    const rawDate = payload['Date'] ?? payload['DATE'];
+    const rawProperty = s(payload['Property '] || payload['Property']);
+    const rawReason = s(payload['Reason '] || payload['Reason']);
+    const incomeKey = Object.keys(payload).find(k => String(k).trim().startsWith('Income'));
+    const expenseKey = Object.keys(payload).find(k => String(k).trim().startsWith('Expenses'));
+    const income = incomeKey ? n(payload[incomeKey]) : null;
+    const expense = expenseKey ? n(payload[expenseKey]) : null;
+
+    let propertyName = normalizePropertyName(formData.mapped_property || rawProperty || inferPropertyFromReason(rawReason));
+
+    db.prepare(`
+      INSERT INTO transactions (
+        import_id, txn_date, property_name, amount, reason, income_amount, expense_amount,
+        year_tag, source_sheet, source_category
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      importId,
+      excelDateToIso(rawDate),
+      propertyName,
+      correctedAmount,
+      rawReason,
+      income,
+      expense,
+      detectYearTag(issue.sheet_name),
+      issue.sheet_name,
+      /^Taxes/i.test(issue.sheet_name || '') ? 'taxes' : 'payments'
+    );
+
+    markIssueResolved(issue.id, 'corrected_amount', {
+      corrected_amount: correctedAmount,
+      mapped_property: propertyName || null
+    });
+    return;
+  }
+
+  if (issue.issue_type === 'unmatched_property_name') {
+    const mappedProperty = normalizePropertyName(formData.mapped_property);
+    if (!mappedProperty) {
+      throw new Error('Mapped property is required');
+    }
+
+    const rawDate = payload['Date'] ?? payload['DATE'];
+    const rawReason = s(payload['Reason '] || payload['Reason']);
+    const amount = n(payload['Amount '] ?? payload['Amount']);
+    const incomeKey = Object.keys(payload).find(k => String(k).trim().startsWith('Income'));
+    const expenseKey = Object.keys(payload).find(k => String(k).trim().startsWith('Expenses'));
+    const income = incomeKey ? n(payload[incomeKey]) : null;
+    const expense = expenseKey ? n(payload[expenseKey]) : null;
+
+    if (amount == null) {
+      throw new Error('Original row still has no parsable amount; resolve amount first');
+    }
+
+    db.prepare(`
+      INSERT INTO transactions (
+        import_id, txn_date, property_name, amount, reason, income_amount, expense_amount,
+        year_tag, source_sheet, source_category
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      importId,
+      excelDateToIso(rawDate),
+      mappedProperty,
+      amount,
+      rawReason,
+      income,
+      expense,
+      detectYearTag(issue.sheet_name),
+      issue.sheet_name,
+      /^Taxes/i.test(issue.sheet_name || '') ? 'taxes' : 'payments'
+    );
+
+    markIssueResolved(issue.id, 'mapped_property', {
+      mapped_property: mappedProperty
+    });
+    return;
+  }
+
+  throw new Error(`No repair handler for issue type: ${issue.issue_type}`);
+}
+
 app.get('/', (req, res) => {
   const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
 
@@ -597,10 +763,23 @@ app.get('/', (req, res) => {
     transactions: db.prepare('SELECT COUNT(*) AS c FROM transactions WHERE import_id = ?').get(latestImport.id).c,
     properties: db.prepare('SELECT COUNT(DISTINCT property_name) AS c FROM transactions WHERE import_id = ? AND property_name IS NOT NULL').get(latestImport.id).c,
     values: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
-    issues: db.prepare('SELECT COUNT(*) AS c FROM import_issues WHERE import_id = ?').get(latestImport.id).c
+    issues: db.prepare(`SELECT COUNT(*) AS c FROM import_issues WHERE import_id = ? AND COALESCE(status, 'open') = 'open'`).get(latestImport.id).c
   } : null;
 
-  const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 10').all();
+  const recentImports = db.prepare(`
+    SELECT
+      i.*,
+      COALESCE((
+        SELECT COUNT(*)
+        FROM import_issues ii
+        WHERE ii.import_id = i.id
+          AND COALESCE(ii.status, 'open') = 'open'
+      ), 0) AS open_issue_count
+    FROM imports i
+    ORDER BY i.id DESC
+    LIMIT 10
+  `).all();
+
   res.render('index', { latestImport, stats, recentImports, formatCurrency });
 });
 
@@ -618,6 +797,41 @@ app.post('/import', upload.single('financialFile'), (req, res) => {
     console.error(err);
     res.status(500).send(`Import failed: ${err.message}`);
   }
+});
+
+app.post('/imports/:id/issues/:issueId/resolve', (req, res) => {
+  const importId = Number(req.params.id);
+  const issueId = Number(req.params.issueId);
+
+  const issue = db.prepare(`
+    SELECT * FROM import_issues
+    WHERE id = ? AND import_id = ?
+  `).get(issueId, importId);
+
+  if (!issue) return res.status(404).send('Issue not found');
+
+  try {
+    replayIssue(issue, req.body);
+    res.redirect(`/imports/${importId}`);
+  } catch (err) {
+    console.error(err);
+    res.status(400).send(`Could not resolve issue: ${err.message}`);
+  }
+});
+
+app.post('/imports/:id/issues/:issueId/ignore', (req, res) => {
+  const importId = Number(req.params.id);
+  const issueId = Number(req.params.issueId);
+
+  const issue = db.prepare(`
+    SELECT * FROM import_issues
+    WHERE id = ? AND import_id = ?
+  `).get(issueId, importId);
+
+  if (!issue) return res.status(404).send('Issue not found');
+
+  markIssueIgnored(issueId, req.body.reason || null);
+  res.redirect(`/imports/${importId}`);
 });
 
 app.get('/imports/:id', (req, res) => {
@@ -653,9 +867,19 @@ app.get('/imports/:id', (req, res) => {
   const issues = db.prepare(`
     SELECT * FROM import_issues
     WHERE import_id = ?
-    ORDER BY sheet_name, row_number
+    ORDER BY
+      CASE COALESCE(status, 'open')
+        WHEN 'open' THEN 0
+        WHEN 'ignored' THEN 1
+        WHEN 'resolved' THEN 2
+        ELSE 3
+      END,
+      sheet_name,
+      row_number
     LIMIT 200
   `).all(importId);
+
+  const propertyOptions = getCanonicalPropertyList(importId);
 
   res.render('import-detail', {
     imp,
@@ -663,6 +887,7 @@ app.get('/imports/:id', (req, res) => {
     properties,
     propertyValues,
     issues,
+    propertyOptions,
     formatCurrency
   });
 });
