@@ -57,7 +57,7 @@
       width: 100%;
       border-collapse: collapse;
       margin-top: 0.75rem;
-      min-width: 700px;
+      min-width: 900px;
     }
     th, td {
       border: 1px solid #e5e7eb;
@@ -81,9 +81,76 @@
       font-size: 0.85rem;
       white-space: nowrap;
     }
+    .issue-badge.resolved {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .issue-badge.ignored {
+      background: #e5e7eb;
+      color: #374151;
+    }
     .ok-empty {
       color: #6b7280;
       padding: 0.25rem 0 0;
+    }
+    .issue-actions {
+      min-width: 320px;
+    }
+    .issue-actions form {
+      margin-bottom: 0.5rem;
+      padding: 0.75rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: #f9fafb;
+    }
+    .issue-actions label {
+      display: block;
+      font-size: 0.9rem;
+      color: #374151;
+      margin-bottom: 0.3rem;
+      font-weight: 600;
+    }
+    .issue-actions input[type="text"],
+    .issue-actions select {
+      width: 100%;
+      padding: 0.55rem 0.65rem;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      margin-bottom: 0.65rem;
+      background: #fff;
+    }
+    .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .btn, button {
+      display: inline-block;
+      padding: 0.65rem 0.9rem;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      background: #111827;
+      color: #fff;
+      text-decoration: none;
+      cursor: pointer;
+      font-size: 0.92rem;
+    }
+    .btn.secondary,
+    button.secondary {
+      background: #fff;
+      color: #111827;
+    }
+    .raw-preview {
+      margin-top: 0.5rem;
+      font-size: 0.85rem;
+      color: #4b5563;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f9fafb;
+      padding: 0.6rem;
+      border-radius: 6px;
+      border: 1px solid #e5e7eb;
+      max-width: 500px;
     }
   </style>
 </head>
@@ -117,8 +184,8 @@
       <span>Property values</span>
     </div>
     <div class="card">
-      <strong><%= issues.length %></strong>
-      <span>Visible issues</span>
+      <strong><%= issues.filter(function(i) { return (i.status || 'open') === 'open'; }).length %></strong>
+      <span>Open issues</span>
     </div>
   </div>
 
@@ -227,7 +294,7 @@
   </div>
 
   <div class="panel">
-    <h2>Import issues</h2>
+    <h2>Review and repair issues</h2>
     <% if (issues && issues.length) { %>
       <div class="scroll">
         <table>
@@ -235,17 +302,106 @@
             <tr>
               <th>Sheet</th>
               <th>Row</th>
+              <th>Status</th>
               <th>Type</th>
               <th>Message</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             <% issues.forEach(function(row) { %>
+              <% const status = row.status || 'open'; %>
+              <% const payload = row.raw_payload ? JSON.parse(row.raw_payload) : {}; %>
+              <% const defaultProperty = (payload['Property '] || payload['Property'] || ''); %>
               <tr>
                 <td><%= row.sheet_name || '' %></td>
                 <td><%= row.row_number ?? '' %></td>
+                <td>
+                  <span class="issue-badge <%= status === 'resolved' ? 'resolved' : (status === 'ignored' ? 'ignored' : '') %>">
+                    <%= status %>
+                  </span>
+                </td>
                 <td><span class="issue-badge"><%= row.issue_type || '' %></span></td>
-                <td><%= row.message || '' %></td>
+                <td>
+                  <%= row.message || '' %>
+                  <% if (row.resolution_type) { %>
+                    <div class="muted" style="margin-top: 0.4rem;">
+                      Resolution: <%= row.resolution_type %>
+                    </div>
+                  <% } %>
+                  <div class="raw-preview"><%= JSON.stringify(payload, null, 2) %></div>
+                </td>
+                <td class="issue-actions">
+                  <% if (status === 'open') { %>
+                    <% if (row.issue_type === 'invalid_transaction_amount') { %>
+                      <form method="POST" action="/imports/<%= imp.id %>/issues/<%= row.id %>/resolve">
+                        <label for="corrected_amount_<%= row.id %>">Corrected amount</label>
+                        <input
+                          id="corrected_amount_<%= row.id %>"
+                          name="corrected_amount"
+                          type="text"
+                          placeholder="Example: 1250.00"
+                          required
+                        />
+
+                        <label for="mapped_property_amount_<%= row.id %>">Property, optional</label>
+                        <select id="mapped_property_amount_<%= row.id %>" name="mapped_property">
+                          <option value="">No property</option>
+                          <% propertyOptions.forEach(function(option) { %>
+                            <option value="<%= option %>" <%= normalizePropertyName ? '' : '' %>><%= option %></option>
+                          <% }) %>
+                        </select>
+
+                        <div class="btn-row">
+                          <button type="submit">Resolve amount</button>
+                        </div>
+                      </form>
+                    <% } %>
+
+                    <% if (row.issue_type === 'unmatched_property_name') { %>
+                      <form method="POST" action="/imports/<%= imp.id %>/issues/<%= row.id %>/resolve">
+                        <label for="mapped_property_<%= row.id %>">Map property</label>
+                        <select id="mapped_property_<%= row.id %>" name="mapped_property" required>
+                          <option value="">Select property</option>
+                          <% propertyOptions.forEach(function(option) { %>
+                            <option
+                              value="<%= option %>"
+                              <%= option === defaultProperty || option === normalizePropertyName(defaultProperty) ? 'selected' : '' %>>
+                              <%= option %>
+                            </option>
+                          <% }) %>
+                        </select>
+
+                        <div class="btn-row">
+                          <button type="submit">Resolve property</button>
+                        </div>
+                      </form>
+                    <% } %>
+
+                    <% if (row.issue_type !== 'invalid_transaction_amount' && row.issue_type !== 'unmatched_property_name') { %>
+                      <div class="muted" style="margin-bottom: 0.75rem;">
+                        No inline repair form is configured yet for this issue type.
+                      </div>
+                    <% } %>
+
+                    <form method="POST" action="/imports/<%= imp.id %>/issues/<%= row.id %>/ignore">
+                      <label for="ignore_reason_<%= row.id %>">Ignore note, optional</label>
+                      <input
+                        id="ignore_reason_<%= row.id %>"
+                        name="reason"
+                        type="text"
+                        placeholder="Why this issue can be ignored"
+                      />
+                      <div class="btn-row">
+                        <button type="submit" class="secondary">Ignore issue</button>
+                      </div>
+                    </form>
+                  <% } else { %>
+                    <div class="muted">
+                      This issue has been <%= status %>.
+                    </div>
+                  <% } %>
+                </td>
               </tr>
             <% }) %>
           </tbody>
