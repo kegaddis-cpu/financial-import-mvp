@@ -44,7 +44,7 @@
       border-radius: 10px;
       padding: 1rem;
       margin-bottom: 1.5rem;
-      max-width: 760px;
+      max-width: 900px;
     }
     input[type="file"] {
       display: block;
@@ -70,10 +70,23 @@
       margin-bottom: 0.25rem;
       color: #111827;
     }
+    .issues-flag {
+      background: #fff7ed;
+      border-color: #fed7aa;
+    }
+    .issues-flag strong {
+      color: #9a3412;
+    }
+    .issues-note {
+      color: #9a3412;
+      font-size: 0.9rem;
+      margin-top: 0.35rem;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
       margin-top: 1rem;
+      max-width: 900px;
     }
     th, td {
       border: 1px solid #e5e7eb;
@@ -91,13 +104,22 @@
     .muted {
       color: #6b7280;
     }
+    .issue-pill {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 999px;
+      background: #fef3c7;
+      color: #92400e;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
   <h1>Financial workbook importer</h1>
   <p>
     Upload your Excel workbook, review imported account snapshots, transactions,
-    portfolio properties, and flagged import issues.
+    portfolio properties, and repair flagged import issues.
   </p>
 
   <div class="top-actions">
@@ -148,9 +170,14 @@
           <strong><%= stats.values %></strong>
           <span>Property values</span>
         </div>
-        <div class="stat">
+        <div class="stat <%= stats.issues > 0 ? 'issues-flag' : '' %>">
           <strong><%= stats.issues %></strong>
-          <span>Issues</span>
+          <span>Open issues</span>
+          <% if (stats.issues > 0 && latestImport) { %>
+            <div class="issues-note">
+              <a href="/imports/<%= latestImport.id %>">Review and repair latest import</a>
+            </div>
+          <% } %>
         </div>
       </div>
     </div>
@@ -166,6 +193,7 @@
           <th>Filename</th>
           <th>Imported</th>
           <th>Rows</th>
+          <th>Issues</th>
           <th>Open</th>
         </tr>
       </thead>
@@ -176,7 +204,18 @@
             <td><%= item.filename %></td>
             <td><%= item.imported_at %></td>
             <td><%= item.row_count %></td>
-            <td><a href="/imports/<%= item.id %>">View</a></td>
+            <td>
+              <% if ((item.open_issue_count || 0) > 0) { %>
+                <span class="issue-pill"><%= item.open_issue_count %> open</span>
+              <% } else { %>
+                <span class="muted">0 open</span>
+              <% } %>
+            </td>
+            <td>
+              <a href="/imports/<%= item.id %>">
+                <%= (item.open_issue_count || 0) > 0 ? 'Review / Repair' : 'View' %>
+              </a>
+            </td>
           </tr>
         <% }) %>
       </tbody>
