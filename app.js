@@ -117,20 +117,55 @@ CREATE TABLE IF NOT EXISTS import_issues (
 }
 initDb();
 
+/**
+ * Multer: disk storage with type/size validation
+ */
 const storage = multer.diskStorage({
   destination: (_, __, cb) => cb(null, uploadsDir),
-  filename: (_, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
+  filename: (_, file, cb) => {
+    const safeOriginal = String(file.originalname || 'upload.xlsx')
+      .replace(/[^a-zA-Z0-9._-]/g, '_');
+    cb(null, `${Date.now()}-${safeOriginal}`);
+  }
 });
-const upload = multer({ storage });
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB
+  fileFilter: (_, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const okMime = new Set([
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'application/octet-stream'
+    ]);
+
+    if (ext !== '.xlsx' && ext !== '.xls') {
+      return cb(new Error('Only .xlsx or .xls workbook files are allowed'));
+    }
+
+    if (file.mimetype && !okMime.has(file.mimetype)) {
+      return cb(new Error(`Unsupported file type: ${file.mimetype}`));
+    }
+
+    cb(null, true);
+  }
+});
 
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+/**
+ * Helper functions
+ */
 function excelDateToIso(value) {
   if (value == null || value === '') return null;
-  if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
+  if (value instanceof Date && !isNaN(value)) {
+    return value.toISOString().slice(0, 10);
+  }
 
   if (typeof value === 'number') {
     const parsed = XLSX.SSF.parse_date_code(value);
@@ -199,11 +234,12 @@ function normalizePropertyName(name) {
 
   const raw = String(name).trim();
   const map = {
-    'The boys': 'The Boys',
-    'The boys ': 'The Boys',
-    'The Boys ': 'The Boys',
-    'Riverview boys': 'The Boys',
-    'Riverview Boys': 'The Boys',
+    'The boys': 'Blue Plume Ct',
+    'The boys ': 'Blue Plume Ct',
+    'The Boys': 'Blue Plume Ct',
+    'The Boys ': 'Blue Plume Ct',
+    'Riverview boys': 'Blue Plume Ct',
+    'Riverview Boys': 'Blue Plume Ct',
     'Riverview': 'Carlton Fields Dr',
     'Riverview ': 'Carlton Fields Dr',
     'Riverview rental': 'Carlton Fields Dr',
@@ -249,7 +285,6 @@ function getCanonicalPropertySet(workbook) {
     'Bridgecrossing Dr',
     'Brookville Dr',
     'Carlton Fields Dr',
-    'The Boys',
     'Vistazo',
     'Sedona',
     'Singer'
@@ -277,7 +312,6 @@ function getCanonicalPropertyList(importId = null) {
     'Bridgecrossing Dr',
     'Brookville Dr',
     'Carlton Fields Dr',
-    'The Boys',
     'Vistazo',
     'Sedona',
     'Singer'
@@ -465,8 +499,44 @@ function getLatestImportId() {
   return latest ? latest.id : null;
 }
 
+/**
+ * Workbook shape validation
+ */
+function validateWorkbookShape(workbook) {
+  const issues = [];
+
+  if (!workbook || !Array.isArray(workbook.SheetNames) || workbook.SheetNames.length === 0) {
+    issues.push('Workbook appears to be empty or unreadable');
+    return issues;
+  }
+
+  const hasAccounts = !!findSheet(workbook, 'Accounts');
+  const hasPropertyValues = !!findSheet(workbook, 'Property Values');
+  const hasYearSheets = workbook.SheetNames.some(name => /^(Payments|Taxes)\s*\d+/i.test(name));
+
+  if (!hasAccounts) issues.push('Missing required sheet: Accounts');
+  if (!hasPropertyValues) issues.push('Missing required sheet: Property Values');
+  if (!hasYearSheets) issues.push('Missing year sheets like Payments 26 or Taxes 26');
+
+  return issues;
+}
+
+/**
+ * Import workbook
+ */
 function importWorkbook(filePath, originalName) {
-  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  let workbook;
+  try {
+    workbook = XLSX.readFile(filePath, { cellDates: true });
+  } catch (err) {
+    throw new Error(`Excel workbook could not be read: ${err.message}`);
+  }
+
+  const validationIssues = validateWorkbookShape(workbook);
+  if (validationIssues.length) {
+    throw new Error(validationIssues.join(' | '));
+  }
+
   const validProperties = getCanonicalPropertySet(workbook);
 
   const importInfo = db.prepare(`
@@ -540,377 +610,4 @@ function importWorkbook(filePath, originalName) {
 
         if (isProbablySummaryRow(r)) continue;
         if (/^Payments\s*21$/i.test(sheetName) && shouldSkipPayments21Row(r)) continue;
-        if (isFooterLikeText(r)) continue;
-        if (isGarbageOrSummaryPaymentsRow(r)) continue;
-
-        const rawDate = r['Date'] ?? r['DATE'];
-        const rawProperty = s(r['Property '] || r['Property']);
-        const rawReason = s(r['Reason '] || r['Reason']);
-        const amount = n(r['Amount '] ?? r['Amount']);
-
-        const incomeKey = Object.keys(r).find(k => String(k).trim().startsWith('Income'));
-        const expenseKey = Object.keys(r).find(k => String(k).trim().startsWith('Expenses'));
-        const income = incomeKey ? n(r[incomeKey]) : null;
-        const expense = expenseKey ? n(r[expenseKey]) : null;
-
-        const looksLikeTransaction =
-          excelDateToIso(rawDate) || rawProperty || rawReason || income != null || expense != null || amount != null;
-
-        if (!looksLikeTransaction) continue;
-        if (rawProperty && isNonPortfolioCategory(rawProperty)) continue;
-
-        let propertyName = sanitizeImportedPropertyName(rawProperty, validProperties);
-
-        if (!propertyName && /^Payments\s*21$/i.test(sheetName)) {
-          const inferred = inferPropertyFromReason(rawReason);
-          propertyName = sanitizeImportedPropertyName(inferred, validProperties);
-        }
-
-        if (!propertyName && rawProperty && !isNonPortfolioCategory(rawProperty)) {
-          const inferred = inferPropertyFromReason(rawReason);
-          propertyName = sanitizeImportedPropertyName(inferred, validProperties) || null;
-        }
-
-        if (!propertyName && rawProperty && !isNonPortfolioCategory(rawProperty)) {
-          addIssue(importId, sheetName, 'unmatched_property_name', rowNum, r, `Ignored non-portfolio property label: ${rawProperty}`);
-          continue;
-        }
-
-        if (amount == null) {
-          if (hasExplicitZeroLedger(r)) continue;
-          addIssue(importId, sheetName, 'invalid_transaction_amount', rowNum, r, 'Amount could not be parsed');
-          continue;
-        }
-
-        insertTxn.run(
-          importId,
-          excelDateToIso(rawDate),
-          propertyName,
-          amount,
-          rawReason,
-          income,
-          expense,
-          yearTag,
-          sheetName,
-          category
-        );
-        rowCount++;
-      }
-      continue;
-    }
-
-    if (normalizeSheetKey(sheetName) === normalizeSheetKey('Property Values')) {
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
-        const address = s(r['Address '] || r['Address']);
-        const purchased = n(r['Purchased '] ?? r['Purchased']);
-        const estimate = n(r['Estimate '] ?? r['Estimate']);
-
-        if (!address && purchased == null && estimate == null) continue;
-        if (!address) continue;
-
-        insertValue.run(
-          importId,
-          normalizePropertyName(address),
-          purchased,
-          estimate,
-          excelDateToIso(r['Unnamed: 3']),
-          n(r['Profit/Loss'] ?? r['Profit / Loss']),
-          n(r['Unnamed: 5']),
-          excelDateToIso(r['Unnamed: 6'])
-        );
-        rowCount++;
-      }
-      continue;
-    }
-
-    if (normalizeSheetKey(sheetName) === normalizeSheetKey('Revenue and Expenses updated')) {
-      recognizedRevenueSheet = true;
-      continue;
-    }
-  }
-
-  if (!recognizedRevenueSheet) {
-    const attempted = findSheet(workbook, 'Revenue and Expenses updated');
-    if (!attempted) {
-      addIssue(importId, 'Revenue and Expenses updated', 'unmapped_sheet', null, {}, 'Sheet "Revenue and Expenses updated" not found');
-    }
-  }
-
-  db.prepare('UPDATE imports SET row_count = ? WHERE id = ?').run(rowCount, importId);
-  return importId;
-}
-
-function markIssueResolved(issueId, resolutionType, resolutionPayload) {
-  db.prepare(`
-    UPDATE import_issues
-    SET
-      status = 'resolved',
-      resolution_type = ?,
-      resolution_payload = ?,
-      resolved_at = datetime('now')
-    WHERE id = ?
-  `).run(resolutionType, JSON.stringify(resolutionPayload ?? {}), issueId);
-}
-
-function markIssueIgnored(issueId, reason) {
-  db.prepare(`
-    UPDATE import_issues
-    SET
-      status = 'ignored',
-      resolution_type = 'ignored',
-      resolution_payload = ?,
-      resolved_at = datetime('now')
-    WHERE id = ?
-  `).run(JSON.stringify({ reason: reason || null }), issueId);
-}
-
-function replayIssue(issue, formData) {
-  const payload = issue.raw_payload ? JSON.parse(issue.raw_payload) : {};
-  const importId = issue.import_id;
-
-  if (issue.issue_type === 'invalid_transaction_amount') {
-    const correctedAmount = n(formData.corrected_amount);
-    if (correctedAmount == null) {
-      throw new Error('Corrected amount is required');
-    }
-
-    const rawDate = payload['Date'] ?? payload['DATE'];
-    const rawProperty = s(payload['Property '] || payload['Property']);
-    const rawReason = s(payload['Reason '] || payload['Reason']);
-    const incomeKey = Object.keys(payload).find(k => String(k).trim().startsWith('Income'));
-    const expenseKey = Object.keys(payload).find(k => String(k).trim().startsWith('Expenses'));
-    const income = incomeKey ? n(payload[incomeKey]) : null;
-    const expense = expenseKey ? n(payload[expenseKey]) : null;
-
-    let propertyName = normalizePropertyName(formData.mapped_property || rawProperty || inferPropertyFromReason(rawReason));
-
-    db.prepare(`
-      INSERT INTO transactions (
-        import_id, txn_date, property_name, amount, reason, income_amount, expense_amount,
-        year_tag, source_sheet, source_category
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      importId,
-      excelDateToIso(rawDate),
-      propertyName,
-      correctedAmount,
-      rawReason,
-      income,
-      expense,
-      detectYearTag(issue.sheet_name),
-      issue.sheet_name,
-      /^Taxes/i.test(issue.sheet_name || '') ? 'taxes' : 'payments'
-    );
-
-    markIssueResolved(issue.id, 'corrected_amount', {
-      corrected_amount: correctedAmount,
-      mapped_property: propertyName || null
-    });
-    return;
-  }
-
-  if (issue.issue_type === 'unmatched_property_name') {
-    const mappedProperty = normalizePropertyName(formData.mapped_property);
-    if (!mappedProperty) {
-      throw new Error('Mapped property is required');
-    }
-
-    const rawDate = payload['Date'] ?? payload['DATE'];
-    const rawReason = s(payload['Reason '] || payload['Reason']);
-    const amount = n(payload['Amount '] ?? payload['Amount']);
-    const incomeKey = Object.keys(payload).find(k => String(k).trim().startsWith('Income'));
-    const expenseKey = Object.keys(payload).find(k => String(k).trim().startsWith('Expenses'));
-    const income = incomeKey ? n(payload[incomeKey]) : null;
-    const expense = expenseKey ? n(payload[expenseKey]) : null;
-
-    if (amount == null) {
-      throw new Error('Original row still has no parsable amount; resolve amount first');
-    }
-
-    db.prepare(`
-      INSERT INTO transactions (
-        import_id, txn_date, property_name, amount, reason, income_amount, expense_amount,
-        year_tag, source_sheet, source_category
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      importId,
-      excelDateToIso(rawDate),
-      mappedProperty,
-      amount,
-      rawReason,
-      income,
-      expense,
-      detectYearTag(issue.sheet_name),
-      issue.sheet_name,
-      /^Taxes/i.test(issue.sheet_name || '') ? 'taxes' : 'payments'
-    );
-
-    markIssueResolved(issue.id, 'mapped_property', {
-      mapped_property: mappedProperty
-    });
-    return;
-  }
-
-  throw new Error(`No repair handler for issue type: ${issue.issue_type}`);
-}
-
-app.get('/', (req, res) => {
-  const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
-
-  const stats = latestImport ? {
-    accounts: db.prepare('SELECT COUNT(*) AS c FROM account_snapshots WHERE import_id = ?').get(latestImport.id).c,
-    transactions: db.prepare('SELECT COUNT(*) AS c FROM transactions WHERE import_id = ?').get(latestImport.id).c,
-    properties: db.prepare('SELECT COUNT(DISTINCT property_name) AS c FROM transactions WHERE import_id = ? AND property_name IS NOT NULL').get(latestImport.id).c,
-    values: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
-    issues: db.prepare(`SELECT COUNT(*) AS c FROM import_issues WHERE import_id = ? AND COALESCE(status, 'open') = 'open'`).get(latestImport.id).c
-  } : null;
-
-  const recentImports = db.prepare(`
-    SELECT
-      i.*,
-      COALESCE((
-        SELECT COUNT(*)
-        FROM import_issues ii
-        WHERE ii.import_id = i.id
-          AND COALESCE(ii.status, 'open') = 'open'
-      ), 0) AS open_issue_count
-    FROM imports i
-    ORDER BY i.id DESC
-    LIMIT 10
-  `).all();
-
-  res.render('index', { latestImport, stats, recentImports, formatCurrency });
-});
-
-app.get('/import', (req, res) => {
-  res.redirect('/');
-});
-
-app.post('/import', upload.single('financialFile'), (req, res) => {
-  if (!req.file) return res.status(400).send('No file uploaded');
-
-  try {
-    const importId = importWorkbook(req.file.path, req.file.originalname);
-    res.redirect(`/imports/${importId}`);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send(`Import failed: ${err.message}`);
-  }
-});
-
-app.post('/imports/:id/issues/:issueId/resolve', (req, res) => {
-  const importId = Number(req.params.id);
-  const issueId = Number(req.params.issueId);
-
-  const issue = db.prepare(`
-    SELECT * FROM import_issues
-    WHERE id = ? AND import_id = ?
-  `).get(issueId, importId);
-
-  if (!issue) return res.status(404).send('Issue not found');
-
-  try {
-    replayIssue(issue, req.body);
-    res.redirect(`/imports/${importId}`);
-  } catch (err) {
-    console.error(err);
-    res.status(400).send(`Could not resolve issue: ${err.message}`);
-  }
-});
-
-app.post('/imports/:id/issues/:issueId/ignore', (req, res) => {
-  const importId = Number(req.params.id);
-  const issueId = Number(req.params.issueId);
-
-  const issue = db.prepare(`
-    SELECT * FROM import_issues
-    WHERE id = ? AND import_id = ?
-  `).get(issueId, importId);
-
-  if (!issue) return res.status(404).send('Issue not found');
-
-  markIssueIgnored(issueId, req.body.reason || null);
-  res.redirect(`/imports/${importId}`);
-});
-
-app.get('/imports/:id', (req, res) => {
-  const importId = Number(req.params.id);
-  const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(importId);
-  if (!imp) return res.status(404).send('Import not found');
-
-  const accounts = db.prepare(`
-    SELECT * FROM account_snapshots
-    WHERE import_id = ?
-    ORDER BY snapshot_date DESC, bank
-  `).all(importId);
-
-  const properties = db.prepare(`
-    SELECT
-      property_name,
-      COUNT(*) AS txn_count,
-      ROUND(SUM(COALESCE(income_amount, CASE WHEN amount > 0 THEN amount ELSE 0 END)), 2) AS income_total,
-      ROUND(ABS(SUM(COALESCE(expense_amount, CASE WHEN amount < 0 THEN amount ELSE 0 END))), 2) AS expense_total,
-      ROUND(SUM(amount), 2) AS net_total
-    FROM transactions
-    WHERE import_id = ? AND property_name IS NOT NULL
-    GROUP BY property_name
-    ORDER BY net_total DESC
-  `).all(importId);
-
-  const propertyValues = db.prepare(`
-    SELECT * FROM property_values
-    WHERE import_id = ?
-    ORDER BY address
-  `).all(importId);
-
-  const issues = db.prepare(`
-    SELECT * FROM import_issues
-    WHERE import_id = ?
-    ORDER BY
-      CASE COALESCE(status, 'open')
-        WHEN 'open' THEN 0
-        WHEN 'ignored' THEN 1
-        WHEN 'resolved' THEN 2
-        ELSE 3
-      END,
-      sheet_name,
-      row_number
-    LIMIT 200
-  `).all(importId);
-
-  const propertyOptions = getCanonicalPropertyList(importId);
-
-  res.render('import-detail', {
-    imp,
-    accounts,
-    properties,
-    propertyValues,
-    issues,
-    propertyOptions,
-    formatCurrency
-  });
-});
-
-app.get('/api/latest-summary', (req, res) => {
-  const importId = getLatestImportId();
-  if (!importId) return res.json({ ok: true, summary: null });
-
-  const summary = db.prepare(`
-    SELECT
-      property_name,
-      ROUND(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 2) AS income,
-      ROUND(ABS(SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END)), 2) AS expenses,
-      ROUND(SUM(amount), 2) AS net
-    FROM transactions
-    WHERE import_id = ? AND property_name IS NOT NULL
-    GROUP BY property_name
-    ORDER BY property_name
-  `).all(importId);
-
-  res.json({ ok: true, importId, summary });
-});
-
-app.listen(PORT, () => {
-  console.log(`Financial importer running on http://localhost:${PORT}`);
-});
+        if (isFooterLikeText(r)) cont
