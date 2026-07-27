@@ -3,413 +3,586 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Import <%= imp.id %></title>
+  <title>Import <%= imp.id %> · Financial workbook importer</title>
   <style>
+    :root {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --text: #182132;
+      --muted: #657089;
+      --border: #dfe4ee;
+      --primary: #0f62fe;
+      --primary-dark: #0b4fd1;
+      --success: #16794b;
+      --warning: #b26a00;
+      --danger: #c52828;
+      --danger-bg: #fff1f1;
+      --warning-bg: #fff7e8;
+      --success-bg: #eefbf3;
+      --shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; }
     body {
-      font-family: Arial, sans-serif;
-      margin: 2rem;
-      color: #1f2937;
-      background: #ffffff;
+      margin: 0;
+      font-family: Inter, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
     }
-    h1, h2 {
-      margin-bottom: 0.5rem;
-    }
-    p {
-      color: #4b5563;
-    }
-    .top-links {
-      display: flex;
-      gap: 1rem;
-      flex-wrap: wrap;
-      margin-bottom: 1rem;
-    }
+
     a {
-      color: #2563eb;
+      color: var(--primary);
       text-decoration: none;
     }
-    .meta, .summary-grid, .panel {
-      margin-bottom: 1.5rem;
+
+    a:hover { text-decoration: underline; }
+
+    .wrap {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 24px;
     }
-    .summary-grid {
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    h1, h2, h3 {
+      margin: 0 0 10px;
+    }
+
+    .subtle {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-      gap: 1rem;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
     }
-    .card, .panel {
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      padding: 1rem;
-      background: #fff;
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      margin-bottom: 20px;
     }
-    .card strong {
-      display: block;
-      font-size: 1.4rem;
-      color: #111827;
-      margin-bottom: 0.25rem;
+
+    .stat {
+      min-height: 108px;
     }
-    .muted {
-      color: #6b7280;
+
+    .stat .label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 8px;
     }
-    .scroll {
-      overflow-x: auto;
+
+    .stat .value {
+      font-size: 30px;
+      font-weight: 700;
+      margin-bottom: 6px;
     }
+
+    .warning {
+      border: 1px solid #f1d49b;
+      background: var(--warning-bg);
+      color: #6f4b00;
+      padding: 14px 16px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+    }
+
+    .danger {
+      border: 1px solid #f0b8b8;
+      background: var(--danger-bg);
+      color: #872424;
+      padding: 14px 16px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+    }
+
+    .success {
+      border: 1px solid #b9e7cb;
+      background: var(--success-bg);
+      color: #155f3d;
+      padding: 14px 16px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
-      margin-top: 0.75rem;
-      min-width: 900px;
+      background: #fff;
     }
+
     th, td {
-      border: 1px solid #e5e7eb;
-      padding: 0.7rem;
-      text-align: left;
+      padding: 12px 10px;
+      border-bottom: 1px solid var(--border);
       vertical-align: top;
+      text-align: left;
+      font-size: 14px;
     }
+
     th {
-      background: #f3f4f6;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      background: #fafbfe;
     }
-    td.num, th.num {
-      text-align: right;
-      white-space: nowrap;
-    }
-    .issue-badge {
-      display: inline-block;
-      padding: 0.2rem 0.5rem;
-      border-radius: 999px;
-      background: #fef3c7;
-      color: #92400e;
-      font-size: 0.85rem;
-      white-space: nowrap;
-    }
-    .issue-badge.resolved {
-      background: #dcfce7;
-      color: #166534;
-    }
-    .issue-badge.ignored {
-      background: #e5e7eb;
-      color: #374151;
-    }
-    .ok-empty {
-      color: #6b7280;
-      padding: 0.25rem 0 0;
-    }
-    .issue-actions {
-      min-width: 320px;
-    }
-    .issue-actions form {
-      margin-bottom: 0.5rem;
-      padding: 0.75rem;
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      background: #f9fafb;
-    }
-    .issue-actions label {
-      display: block;
-      font-size: 0.9rem;
-      color: #374151;
-      margin-bottom: 0.3rem;
-      font-weight: 600;
-    }
-    .issue-actions input[type="text"],
-    .issue-actions select {
-      width: 100%;
-      padding: 0.55rem 0.65rem;
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      margin-bottom: 0.65rem;
-      background: #fff;
-    }
-    .btn-row {
-      display: flex;
-      gap: 0.5rem;
-      flex-wrap: wrap;
-    }
-    .btn, button {
-      display: inline-block;
-      padding: 0.65rem 0.9rem;
-      border-radius: 8px;
-      border: 1px solid #d1d5db;
-      background: #111827;
-      color: #fff;
-      text-decoration: none;
-      cursor: pointer;
-      font-size: 0.92rem;
-    }
-    .btn.secondary,
-    button.secondary {
-      background: #fff;
-      color: #111827;
-    }
-    .raw-preview {
-      margin-top: 0.5rem;
-      font-size: 0.85rem;
-      color: #4b5563;
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
       white-space: pre-wrap;
       word-break: break-word;
-      background: #f9fafb;
-      padding: 0.6rem;
-      border-radius: 6px;
-      border: 1px solid #e5e7eb;
-      max-width: 500px;
+    }
+
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid transparent;
+    }
+
+    .pill-open {
+      background: #fff4e5;
+      color: #8a5500;
+      border-color: #f1d49b;
+    }
+
+    .pill-resolved {
+      background: #eefbf3;
+      color: #155f3d;
+      border-color: #b9e7cb;
+    }
+
+    .pill-ignored {
+      background: #f2f4f8;
+      color: #596579;
+      border-color: #d9dfe8;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    select,
+    textarea {
+      width: 100%;
+      border: 1px solid #cfd7e6;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font: inherit;
+      background: #fff;
+    }
+
+    textarea {
+      min-height: 82px;
+      resize: vertical;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-dark);
+      text-decoration: none;
+    }
+
+    .btn-secondary {
+      background: #fff;
+      color: var(--text);
+      border-color: var(--border);
+    }
+
+    .btn-danger {
+      background: #fff;
+      color: var(--danger);
+      border-color: #efb2b2;
+    }
+
+    .issue-grid {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr;
+      gap: 16px;
+      margin-top: 12px;
+    }
+
+    .issue-box {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      background: #fcfdff;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 8px 0 2px;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .small {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .mb0 { margin-bottom: 0; }
+
+    @media (max-width: 1024px) {
+      .grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .issue-grid,
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .wrap {
+        padding: 16px;
+      }
+      .grid {
+        grid-template-columns: 1fr;
+      }
+      th, td {
+        font-size: 13px;
+        padding: 10px 8px;
+      }
+      .stat .value {
+        font-size: 26px;
+      }
     }
   </style>
 </head>
 <body>
-  <div class="top-links">
-    <a href="/">← Back to dashboard</a>
-    <a href="/expenses/new">Add expense</a>
-    <a href="/sales/new">Record sale</a>
-  </div>
+  <div class="wrap">
+    <div class="topbar">
+      <div>
+        <div class="subtle"><a href="/">← Back to dashboard</a></div>
+        <h1>Import #<%= imp.id %></h1>
+        <div class="subtle">
+          <strong><%= imp.filename %></strong> · Imported <%= imp.imported_at %> · <%= imp.row_count %> parsed rows
+        </div>
+      </div>
+      <div class="actions">
+        <a class="btn btn-secondary" href="/">Home</a>
+      </div>
+    </div>
 
-  <h1>Import #<%= imp.id %></h1>
-  <div class="meta">
-    <p>
-      <strong><%= imp.filename %></strong><br />
-      Imported: <%= imp.imported_at %><br />
-      Parsed rows: <%= imp.row_count %>
-    </p>
-  </div>
+    <%
+      const openIssues = (issues || []).filter(i => (i.status || 'open') === 'open');
+      const resolvedIssues = (issues || []).filter(i => i.status === 'resolved');
+      const ignoredIssues = (issues || []).filter(i => i.status === 'ignored');
+      const accountCount = (accounts || []).length;
+      const propertyCount = (properties || []).length;
+      const propertyValueCount = (propertyValues || []).length;
+    %>
 
-  <div class="summary-grid">
-    <div class="card">
-      <strong><%= accounts.length %></strong>
-      <span>Account snapshots</span>
-    </div>
-    <div class="card">
-      <strong><%= properties.length %></strong>
-      <span>Properties with transactions</span>
-    </div>
-    <div class="card">
-      <strong><%= propertyValues.length %></strong>
-      <span>Property values</span>
-    </div>
-    <div class="card">
-      <strong><%= issues.filter(function(i) { return (i.status || 'open') === 'open'; }).length %></strong>
-      <span>Open issues</span>
-    </div>
-  </div>
+    <% if (openIssues.length > 0) { %>
+      <div class="warning">
+        This import has <strong><%= openIssues.length %></strong> open issue<%= openIssues.length === 1 ? '' : 's' %>. Review and repair them below before treating this import as final.
+      </div>
+    <% } else { %>
+      <div class="success">
+        This import currently has no open issues.
+      </div>
+    <% } %>
 
-  <div class="panel">
-    <h2>Property rollup</h2>
-    <% if (properties && properties.length) { %>
-      <div class="scroll">
+    <div class="grid">
+      <div class="card stat">
+        <div class="label">Accounts</div>
+        <div class="value"><%= accountCount %></div>
+        <div class="subtle">Parsed from account snapshots</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Property summaries</div>
+        <div class="value"><%= propertyCount %></div>
+        <div class="subtle">Distinct properties with transactions</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Property values</div>
+        <div class="value"><%= propertyValueCount %></div>
+        <div class="subtle">Rows imported from Property Values</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Open issues</div>
+        <div class="value"><%= openIssues.length %></div>
+        <div class="subtle">Needs review</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Resolved / ignored</div>
+        <div class="value"><%= resolvedIssues.length + ignoredIssues.length %></div>
+        <div class="subtle">Historical issue actions</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-head">
+        <div>
+          <h2>Property totals</h2>
+          <div class="subtle">Calculated from imported transactions</div>
+        </div>
+      </div>
+
+      <% if (!properties || properties.length === 0) { %>
+        <div class="empty">No property transaction totals were generated for this import.</div>
+      <% } else { %>
         <table>
           <thead>
             <tr>
               <th>Property</th>
-              <th class="num">Transactions</th>
-              <th class="num">Income</th>
-              <th class="num">Expenses</th>
-              <th class="num">Net</th>
+              <th>Transactions</th>
+              <th>Income</th>
+              <th>Expenses</th>
+              <th>Net</th>
             </tr>
           </thead>
           <tbody>
             <% properties.forEach(function(row) { %>
               <tr>
-                <td><%= row.property_name || '' %></td>
-                <td class="num"><%= row.txn_count ?? '' %></td>
-                <td class="num"><%= formatCurrency(row.income_total) %></td>
-                <td class="num"><%= formatCurrency(row.expense_total) %></td>
-                <td class="num"><%= formatCurrency(row.net_total) %></td>
+                <td><%= row.property_name || '—' %></td>
+                <td><%= row.txn_count %></td>
+                <td><%= formatCurrency(row.income_total) %></td>
+                <td><%= formatCurrency(row.expense_total) %></td>
+                <td><%= formatCurrency(row.net_total) %></td>
               </tr>
             <% }) %>
           </tbody>
         </table>
-      </div>
-    <% } else { %>
-      <p class="ok-empty">No property transaction rollup is available for this import.</p>
-    <% } %>
-  </div>
+      <% } %>
+    </div>
 
-  <div class="panel">
-    <h2>Property values</h2>
-    <% if (propertyValues && propertyValues.length) { %>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Address</th>
-              <th class="num">Purchased</th>
-              <th class="num">Estimate</th>
-              <th>Snapshot date</th>
-              <th class="num">Profit/Loss</th>
-              <th class="num">Alt estimate</th>
-              <th>Alt snapshot</th>
-            </tr>
-          </thead>
-          <tbody>
-            <% propertyValues.forEach(function(row) { %>
+    <div class="two-col">
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <h2>Accounts</h2>
+            <div class="subtle">Imported account snapshot rows</div>
+          </div>
+        </div>
+
+        <% if (!accounts || accounts.length === 0) { %>
+          <div class="danger">
+            No accounts were imported for this file. If transactions were imported, this usually means the workbook’s Accounts sheet was missing, misnamed, or structurally inconsistent.
+          </div>
+        <% } else { %>
+          <table>
+            <thead>
               <tr>
-                <td><%= row.address || '' %></td>
-                <td class="num"><%= formatCurrency(row.purchased) %></td>
-                <td class="num"><%= formatCurrency(row.estimate) %></td>
-                <td><%= row.snapshot_date || '' %></td>
-                <td class="num"><%= formatCurrency(row.profit_loss) %></td>
-                <td class="num"><%= formatCurrency(row.alt_estimate) %></td>
-                <td><%= row.alt_snapshot_date || '' %></td>
+                <th>Date</th>
+                <th>Bank</th>
+                <th>Type</th>
+                <th>Balance</th>
               </tr>
-            <% }) %>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              <% accounts.forEach(function(row) { %>
+                <tr>
+                  <td><%= row.snapshot_date || '—' %></td>
+                  <td><%= row.bank || '—' %></td>
+                  <td><%= row.account_type || '—' %></td>
+                  <td><%= formatCurrency(row.balance) %></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        <% } %>
       </div>
-    <% } else { %>
-      <p class="ok-empty">No property valuation rows were imported.</p>
-    <% } %>
-  </div>
 
-  <div class="panel">
-    <h2>Account snapshots</h2>
-    <% if (accounts && accounts.length) { %>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Bank</th>
-              <th>Type</th>
-              <th>Account</th>
-              <th>Routing</th>
-              <th class="num">Balance</th>
-              <th>Sheet</th>
-            </tr>
-          </thead>
-          <tbody>
-            <% accounts.forEach(function(row) { %>
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <h2>Property values</h2>
+            <div class="subtle">Imported valuation rows</div>
+          </div>
+        </div>
+
+        <% if (!propertyValues || propertyValues.length === 0) { %>
+          <div class="empty">No property valuation rows were imported.</div>
+        <% } else { %>
+          <table>
+            <thead>
               <tr>
-                <td><%= row.snapshot_date || '' %></td>
-                <td><%= row.bank || '' %></td>
-                <td><%= row.account_type || '' %></td>
-                <td><%= row.account_num || '' %></td>
-                <td><%= row.routing || '' %></td>
-                <td class="num"><%= formatCurrency(row.balance) %></td>
-                <td><%= row.source_sheet || '' %></td>
+                <th>Address</th>
+                <th>Purchased</th>
+                <th>Estimate</th>
+                <th>Snapshot</th>
               </tr>
-            <% }) %>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              <% propertyValues.forEach(function(row) { %>
+                <tr>
+                  <td><%= row.address || '—' %></td>
+                  <td><%= formatCurrency(row.purchased) %></td>
+                  <td><%= formatCurrency(row.estimate) %></td>
+                  <td><%= row.snapshot_date || '—' %></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        <% } %>
       </div>
-    <% } else { %>
-      <p class="ok-empty">No account snapshots were imported.</p>
-    <% } %>
-  </div>
+    </div>
 
-  <div class="panel">
-    <h2>Review and repair issues</h2>
-    <% if (issues && issues.length) { %>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Sheet</th>
-              <th>Row</th>
-              <th>Status</th>
-              <th>Type</th>
-              <th>Message</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <% issues.forEach(function(row) { %>
-              <% const status = row.status || 'open'; %>
-              <% const payload = row.raw_payload ? JSON.parse(row.raw_payload) : {}; %>
-              <% const defaultProperty = (payload['Property '] || payload['Property'] || ''); %>
-              <tr>
-                <td><%= row.sheet_name || '' %></td>
-                <td><%= row.row_number ?? '' %></td>
-                <td>
-                  <span class="issue-badge <%= status === 'resolved' ? 'resolved' : (status === 'ignored' ? 'ignored' : '') %>">
-                    <%= status %>
-                  </span>
-                </td>
-                <td><span class="issue-badge"><%= row.issue_type || '' %></span></td>
-                <td>
-                  <%= row.message || '' %>
-                  <% if (row.resolution_type) { %>
-                    <div class="muted" style="margin-top: 0.4rem;">
-                      Resolution: <%= row.resolution_type %>
-                    </div>
-                  <% } %>
-                  <div class="raw-preview"><%= JSON.stringify(payload, null, 2) %></div>
-                </td>
-                <td class="issue-actions">
-                  <% if (status === 'open') { %>
-                    <% if (row.issue_type === 'invalid_transaction_amount') { %>
-                      <form method="POST" action="/imports/<%= imp.id %>/issues/<%= row.id %>/resolve">
-                        <label for="corrected_amount_<%= row.id %>">Corrected amount</label>
-                        <input
-                          id="corrected_amount_<%= row.id %>"
-                          name="corrected_amount"
-                          type="text"
-                          placeholder="Example: 1250.00"
-                          required
-                        />
+    <div class="card">
+      <div class="section-head">
+        <div>
+          <h2>Import issues</h2>
+          <div class="subtle">Open issues can be repaired or ignored directly from this page</div>
+        </div>
+      </div>
 
-                        <label for="mapped_property_amount_<%= row.id %>">Property, optional</label>
-                        <select id="mapped_property_amount_<%= row.id %>" name="mapped_property">
+      <% if (!issues || issues.length === 0) { %>
+        <div class="empty">No issues were recorded for this import.</div>
+      <% } else { %>
+        <% issues.forEach(function(issue) { %>
+          <%
+            const payload = issue.raw_payload ? JSON.parse(issue.raw_payload) : {};
+            const status = issue.status || 'open';
+          %>
+
+          <div class="issue-box" style="margin-bottom: 16px;">
+            <div class="section-head">
+              <div>
+                <h3 class="mb0"><%= issue.issue_type %></h3>
+                <div class="small">
+                  Sheet: <%= issue.sheet_name || '—' %>
+                  <% if (issue.row_number) { %> · Row: <%= issue.row_number %><% } %>
+                </div>
+              </div>
+              <div>
+                <% if (status === 'open') { %>
+                  <span class="pill pill-open">Open</span>
+                <% } else if (status === 'resolved') { %>
+                  <span class="pill pill-resolved">Resolved</span>
+                <% } else { %>
+                  <span class="pill pill-ignored">Ignored</span>
+                <% } %>
+              </div>
+            </div>
+
+            <p><%= issue.message || 'No message provided.' %></p>
+
+            <div class="issue-grid">
+              <div>
+                <div class="small" style="margin-bottom: 6px;">Raw row payload</div>
+                <div class="mono"><%= JSON.stringify(payload, null, 2) %></div>
+              </div>
+
+              <div>
+                <% if (status === 'open') { %>
+                  <% if (issue.issue_type === 'invalid_transaction_amount') { %>
+                    <form method="POST" action="/imports/<%= imp.id %>/issues/<%= issue.id %>/resolve" style="margin-bottom: 12px;">
+                      <div class="small" style="margin-bottom: 6px;">Repair amount</div>
+                      <div style="margin-bottom: 10px;">
+                        <label class="small">Corrected amount</label>
+                        <input type="number" step="0.01" name="corrected_amount" placeholder="0.00" required />
+                      </div>
+                      <div style="margin-bottom: 10px;">
+                        <label class="small">Map property (optional)</label>
+                        <select name="mapped_property">
                           <option value="">No property</option>
                           <% propertyOptions.forEach(function(option) { %>
-                          <option value="<%= option %>" <%= normalizePropertyName ? '' : '' %>><%= option %></option>
+                            <option value="<%= option %>"><%= option %></option>
                           <% }) %>
                         </select>
-
-                        <div class="btn-row">
-                          <button type="submit">Resolve amount</button>
-                        </div>
-                      </form>
-                    <% } %>
-
-                    <% if (row.issue_type === 'unmatched_property_name') { %>
-                      <form method="POST" action="/imports/<%= imp.id %>/issues/<%= row.id %>/resolve">
-                        <label for="mapped_property_<%= row.id %>">Map property</label>
-                        <select id="mapped_property_<%= row.id %>" name="mapped_property" required>
+                      </div>
+                      <button class="btn btn-primary" type="submit">Resolve issue</button>
+                    </form>
+                  <% } else if (issue.issue_type === 'unmatched_property_name') { %>
+                    <form method="POST" action="/imports/<%= imp.id %>/issues/<%= issue.id %>/resolve" style="margin-bottom: 12px;">
+                      <div class="small" style="margin-bottom: 6px;">Map to a known property</div>
+                      <div style="margin-bottom: 10px;">
+                        <label class="small">Property</label>
+                        <select name="mapped_property" required>
                           <option value="">Select property</option>
                           <% propertyOptions.forEach(function(option) { %>
-                            <option
-                              value="<%= option %>"
-                              <%= option === defaultProperty || option === normalizePropertyName(defaultProperty) ? 'selected' : '' %>>
-                              <%= option %>
-                            </option>
+                            <option value="<%= option %>"><%= option %></option>
                           <% }) %>
                         </select>
-
-                        <div class="btn-row">
-                          <button type="submit">Resolve property</button>
-                        </div>
-                      </form>
-                    <% } %>
-
-                    <% if (row.issue_type !== 'invalid_transaction_amount' && row.issue_type !== 'unmatched_property_name') { %>
-                      <div class="muted" style="margin-bottom: 0.75rem;">
-                        No inline repair form is configured yet for this issue type.
                       </div>
-                    <% } %>
-
-                    <form method="POST" action="/imports/<%= imp.id %>/issues/<%= row.id %>/ignore">
-                      <label for="ignore_reason_<%= row.id %>">Ignore note, optional</label>
-                      <input
-                        id="ignore_reason_<%= row.id %>"
-                        name="reason"
-                        type="text"
-                        placeholder="Why this issue can be ignored"
-                      />
-                      <div class="btn-row">
-                        <button type="submit" class="secondary">Ignore issue</button>
-                      </div>
+                      <button class="btn btn-primary" type="submit">Map property</button>
                     </form>
                   <% } else { %>
-                    <div class="muted">
-                      This issue has been <%= status %>.
+                    <div class="small" style="margin-bottom: 10px;">
+                      No custom repair form exists yet for this issue type.
                     </div>
                   <% } %>
-                </td>
-              </tr>
-            <% }) %>
-          </tbody>
-        </table>
-      </div>
-    <% } else { %>
-      <p class="ok-empty">No import issues were recorded for this import.</p>
-    <% } %>
+
+                  <form method="POST" action="/imports/<%= imp.id %>/issues/<%= issue.id %>/ignore">
+                    <div style="margin-bottom: 10px;">
+                      <label class="small">Ignore reason (optional)</label>
+                      <textarea name="reason" placeholder="Why this issue is safe to ignore"></textarea>
+                    </div>
+                    <button class="btn btn-danger" type="submit">Ignore issue</button>
+                  </form>
+                <% } else { %>
+                  <div class="small">Resolution type</div>
+                  <div style="margin-bottom: 8px;"><%= issue.resolution_type || '—' %></div>
+
+                  <div class="small">Resolved at</div>
+                  <div style="margin-bottom: 8px;"><%= issue.resolved_at || '—' %></div>
+
+                  <div class="small">Resolution payload</div>
+                  <div class="mono"><%= issue.resolution_payload || '—' %></div>
+                <% } %>
+              </div>
+            </div>
+          </div>
+        <% }) %>
+      <% } %>
+    </div>
   </div>
 </body>
 </html>
