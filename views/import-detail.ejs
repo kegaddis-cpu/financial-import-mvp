@@ -348,7 +348,7 @@
                         <select id="mapped_property_amount_<%= row.id %>" name="mapped_property">
                           <option value="">No property</option>
                           <% propertyOptions.forEach(function(option) { %>
-                            <option value="<%= option %>" <%= normalizePropertyName ? '' : '' %>><%= option %></option>
+                          <option value="<%= option %>" <%= normalizePropertyName ? '' : '' %>><%= option %></option>
                           <% }) %>
                         </select>
 
