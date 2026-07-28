@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Record Sale</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; max-width: 760px; }
+    h1 { margin-bottom: 0.5rem; }
+    p { color: #555; }
+    form { display: grid; gap: 1rem; margin-top: 1.5rem; }
+    label { display: block; font-weight: 600; margin-bottom: 0.35rem; }
+    input, select, textarea, button {
+      width: 100%;
+      padding: 0.75rem;
+      font-size: 1rem;
+      box-sizing: border-box;
+    }
+    textarea { resize: vertical; }
+    button {
+      width: auto;
+      cursor: pointer;
+      background: #111827;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 0.8rem 1.2rem;
+    }
+    .msg {
+      padding: 0.9rem 1rem;
+      border-radius: 8px;
+      margin-top: 1rem;
+    }
+    .ok {
+      background: #e8f7e8;
+      color: #1f6b1f;
+      border: 1px solid #b9e2b9;
+    }
+    .err {
+      background: #fdeaea;
+      color: #8a1f1f;
+      border: 1px solid #efb7b7;
+    }
+    .top-links {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    a { text-decoration: none; color: #0f62fe; }
+  </style>
+</head>
+<body>
+  <div class="top-links">
+    <a href="/">← Back to dashboard</a>
+    <a href="/expenses/new">Add expense</a>
+  </div>
+
+  <h1>Record property sale</h1>
+  <p>Record a sale as a manual transaction tied to a property from your portfolio list.</p>
+
+  <% if (success) { %>
+    <div class="msg ok"><%= success %></div>
+  <% } %>
+
+  <% if (error) { %>
+    <div class="msg err"><%= error %></div>
+  <% } %>
+
+  <form method="POST" action="/sales">
+    <div>
+      <label for="txn_date">Sale date</label>
+      <input id="txn_date" name="txn_date" type="date" required />
+    </div>
+
+    <div>
+      <label for="property_name">Property</label>
+      <select id="property_name" name="property_name" required>
+        <option value="">Select a property</option>
+        <% properties.forEach(function(p) { %>
+          <option value="<%= p.property_name %>"><%= p.property_name %></option>
+        <% }) %>
+      </select>
+    </div>
+
+    <div>
+      <label for="sale_price">Sale price</label>
+      <input id="sale_price" name="sale_price" type="number" step="0.01" min="0" required />
+    </div>
+
+    <div>
+      <label for="reason">Notes</label>
+      <textarea id="reason" name="reason" rows="4" placeholder="Optional notes about the sale, buyer credits, closing context, etc."></textarea>
+    </div>
+
+    <div>
+      <button type="submit">Save sale</button>
+    </div>
+  </form>
+</body>
+</html>

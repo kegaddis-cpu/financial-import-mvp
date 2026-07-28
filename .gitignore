@@ -1,0 +1,8 @@
+.vs/
+node_modules/
+uploads/
+data/
+documents/
+*.db
+Thumbs.db
+.DS_Store

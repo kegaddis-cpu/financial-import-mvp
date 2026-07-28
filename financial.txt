@@ -1,0 +1,1936 @@
+
+
+
+I have this file that I would like to turn into a local application. What are your recommendations
+
+MyFinancials.xlsx
+
+Yes — this spreadsheet looks like a strong candidate for a local-first financial dashboard app, especially because it already contains account balances, rental-property income/expenses, yearly payment logs, and property-value snapshots in one workbook. My main recommendation is to turn it into a desktop-style local web app that reads the Excel file, normalizes the sheets, and gives you dashboards, property drill-downs, and import/edit workflows without depending on a cloud backend at first.
+
+Best app direction
+The workbook appears to mix several financial domains: account balances, recurring payment logs, property-specific income and expenses, tax-related entries, and property valuation data. Because of that, the best first version is not “just a spreadsheet viewer,” but a personal finance and rental portfolio manager with modules for Accounts, Transactions, Properties, Reports, and yearly summaries.
+
+A good local app structure would be:
+
+Accounts: show checking, savings, credit, Marcus, investment, and crypto balances from the Accounts section.
+
+Properties: track places like Carlton Fields, Bridgecrossing, Blue Plume, and others with monthly rent, maintenance, taxes, insurance, and net cash flow.
+
+Transactions: unify dated rows with fields like date, property, amount, reason, income, and expense so you can filter and search cleanly.
+
+Recommended stack
+Given your background in Node.js, Express, EJS, and local development, I’d recommend an Electron or Tauri wrapper around a small local web app, or even a plain Express app running on localhost as phase one. The key is to convert the workbook into a normalized local database such as SQLite, because the spreadsheet clearly contains repeated yearly sections and semi-structured tables that will be much easier to query once imported.
+
+My preference order for you:
+
+Option	Why it fits	Tradeoff
+Express + SQLite + EJS	Closest to your current skill set; fastest MVP for local use.	Feels like a local website, not a native desktop app.
+Electron + Express/SQLite	Lets you package the app as a desktop app while reusing your web skills.	Bigger app footprint.
+Tauri + local frontend + SQLite	Lightweight desktop packaging and strong performance.	Slightly steeper setup if you have not used Rust tooling before.
+Data model
+The workbook content suggests you should split data into a few normalized tables instead of storing each sheet as-is. For example, the recurring “Date / Property / Amount / Reason / Income / Expenses / Total” pattern is ideal for a transactions table, while account snapshots and property values should live in separate tables.
+
+Suggested schema:
+
+accounts_snapshot(id, snapshot_date, bank, account_type, masked_account, routing_masked, balance)
+
+properties(id, property_name, address, category, active_status)
+
+transactions(id, txn_date, property_id, amount, reason, income_amount, expense_amount, source_sheet, year_tag)
+
+property_values(id, property_id, purchased_value, estimated_value, profit_loss, snapshot_date)
+This would let you compute monthly NOI, annual totals, maintenance trends, rent history, and property-by-property performance much more reliably than Excel formulas across many sections.
+
+MVP features
+Start with an MVP that solves the highest-value use cases already visible in the workbook. The most useful first release would be one where you import the spreadsheet, review parsed records, and then browse financial performance by property and year.
+
+I’d build these first:
+
+Excel import wizard, detect sections like Accounts, Payments 24/25/26, Taxes, and Property Values, then map them into structured tables.
+
+Dashboard, total cash, total liabilities, rental income, expenses, and net by month/year using the imported rows.
+
+Property pages, rent history, repairs, insurance, taxes, HOA, and annual profit by property such as Bridgecrossing, Blue Plume, and Carlton Fields.
+
+Search/filter, by date range, property, category, and keyword reason like mortgage, HOA, insurance, rent, or repairs.
+
+Export/reconciliation, CSV export plus “differences since last import” so you can update the workbook and re-sync safely.
+
+Implementation advice
+The spreadsheet appears to contain inconsistent labels, repeated titles, year-based sections, and at least one formula/error artifact (ERRORREF!), so your import layer needs to be defensive. Build the importer as the most important part of the app: parse sheet blocks, standardize property names, infer transaction types, and keep the raw source row for traceability when something does not import cleanly.
+
+A practical build plan:
+
+Phase 1: Local Express app, upload/read .xlsx, parse with xlsx or exceljs, store in SQLite.
+
+Phase 2: Add dashboards with Chart.js and per-property reporting.
+
+Phase 3: Package it with Electron if you want a clickable desktop app.
+
+Phase 4: Add manual corrections, category rules, and duplicate detection for repeated imports.
+
+The biggest design decision is whether Excel remains the “source of truth” or whether the app becomes the source of truth after the initial import. For long-term maintainability, I’d treat Excel as the import source only and let the app/database own cleaned records from that point forward.
+
+Would you like me to outline the exact folder structure and database schema for a Node/Express + SQLite local MVP based on this workbook?
+
+yes as well as a target for making the app the source of truth
+Completed 2 steps
+Yes — and if you want the app to become the source of truth, you should design it as a ledger-first system where every balance, report, and dashboard is derived from normalized records in the app database rather than from Excel formulas. Your workbook already has repeated yearly payment sections, account snapshots, property values, and some inconsistencies like ERRORREF!, which is exactly the kind of structure that works better in a database-backed app than in a growing spreadsheet.
+
+Target architecture
+The best target is a local Node/Express app with SQLite for storage, a small service layer for business rules, and an import pipeline that brings your current workbook into the database once and then treats Excel as legacy input only. That fits your existing Node/Express workflow and keeps the app simple to run locally while giving you a clean path to package it later as a desktop app.
+
+Recommended stack:
+
+Node.js + Express for routes and app structure, which matches how you already build apps.
+
+SQLite for the local database, because this is single-user local-first and doesn’t need MySQL overhead at the start.
+
+EJS or a lightweight frontend for the UI, since that is already in your comfort zone.
+
+better-sqlite3 or sqlite3 for DB access, xlsx/exceljs for one-time import from the workbook.
+
+A clean folder target would look like this:
+
+app.js or server.js
+
+routes/
+
+services/
+
+db/
+
+views/
+
+public/
+
+imports/
+
+backups/
+This separation matters because once the app is the source of truth, import logic, transaction logic, and reporting logic should not all live in one file.
+
+Source-of-truth model
+Your workbook currently behaves like a mixed source: some rows are raw transactions, some are summaries, some are valuation snapshots, and some appear to be manual calculation areas such as monthly rollups and payoff estimates. In the app, the source of truth should be only the atomic records: transactions, account snapshots, properties, tenants, categories, loans, and valuation snapshots; all totals and dashboards should then be computed from those records on demand.
+
+That means:
+
+Keep raw transaction rows such as date, property, amount, reason, income, and expense as primary records.
+
+Keep account balances as point-in-time snapshots, not hard-coded totals.
+
+Keep property values as dated valuation entries, not single overwritten cells.
+
+Do not store report totals like “Income 153,640.22 / Expenses 67,591.98 / Total 86,048.24” as truth; those should be regenerated by queries.
+
+The rule is simple: if a number can be recalculated from underlying rows, it should be calculated, not manually maintained. That avoids spreadsheet drift and broken formulas such as the error marker visible in the workbook.
+
+Database schema
+Based on the workbook structure, I’d recommend this first schema. The workbook clearly includes account snapshots, property transactions, annual payment/tax sections, and property value snapshots, so those need separate normalized tables.
+
+Core tables
+properties
+
+id
+
+name
+
+address
+
+city
+
+state
+
+zip
+
+status
+
+notes
+
+accounts
+
+id
+
+institution
+
+account_type
+
+nickname
+
+masked_account_number
+
+masked_routing_number
+
+is_active
+
+account_snapshots
+
+id
+
+account_id
+
+snapshot_date
+
+balance
+
+source
+
+notes
+
+transactions
+
+id
+
+txn_date
+
+property_id nullable
+
+account_id nullable
+
+payee
+
+description
+
+amount
+
+direction (income or expense)
+
+category_id
+
+subcategory_id nullable
+
+is_split
+
+source
+
+external_ref
+
+notes
+
+created_at
+
+updated_at
+
+categories
+
+id
+
+name
+
+type (income, expense, transfer, asset, liability)
+
+parent_id nullable
+
+valuation_snapshots
+
+id
+
+property_id
+
+snapshot_date
+
+purchase_price
+
+estimated_value
+
+equity_estimate
+
+profit_loss_estimate
+
+source_note
+
+Helpful support tables
+loans
+
+id
+
+property_id
+
+lender
+
+original_amount
+
+current_balance
+
+interest_rate
+
+monthly_payment
+
+rules
+
+id
+
+match_text
+
+assign_category_id
+
+assign_property_id
+
+assign_payee
+
+is_active
+
+imports
+
+id
+
+imported_at
+
+filename
+
+status
+
+row_count
+
+notes
+
+import_rows
+
+id
+
+import_id
+
+sheet_name
+
+raw_row_json
+
+normalized_transaction_id nullable
+
+error_message nullable
+
+This schema gives you a clean base for dashboards, reports, edits, and auditability while preserving where imported data came from.
+
+App modules
+Because the workbook spans personal finance and rental portfolio tracking, the app should be divided into a few focused modules rather than one giant spreadsheet-like screen. The recurring property names, account balances, and dated payment logs in the workbook support this modular layout well.
+
+Recommended modules:
+
+Dashboard: net worth, cash on hand, monthly net, top expenses, rent collected, overdue items.
+
+Properties: one page per property showing rent history, taxes, insurance, HOA, repairs, and valuation trend.
+
+Transactions: searchable ledger with filters by date, property, category, and keyword like mortgage, Culligan, HOA, insurance, or rent.
+
+Accounts: balance history and manual reconciliation for BOA, Marcus, Edward Jones, crypto, and credit.
+
+Reports: monthly P&L, annual property summary, tax category exports, cash-flow trend.
+
+Admin: import workbook, review unmatched rows, manage categories/rules, run backups.
+
+Migration plan
+To make the app the source of truth, I would not try to preserve the workbook’s sheet design inside the app. Instead, do a staged migration from spreadsheet sections into normalized records. The workbook shows repeated year blocks like Payments 26, Payments 25, Payments 24, older payment logs, and account/property value sections, so a staged import is much safer than a direct one-pass conversion.
+
+Use this migration path:
+
+Import static entities first: properties, accounts, categories, and initial valuation records.
+
+Import transactions year by year from the Payments/Taxes sections, mapping each row into a normalized transaction record.
+
+Flag questionable rows for manual review, especially rows with malformed dates, duplicate rent entries, zero-amount oddities, and formula artifacts like ERRORREF!.
+
+Recompute yearly totals in the app and compare them against workbook summaries to validate the migration.
+
+Freeze Excel as read-only history once the imported numbers reconcile well enough.
+
+Your import system should produce three outcomes per row:
+
+Imported automatically.
+
+Imported with warning.
+
+Needs review.
+That is important because the workbook has irregular sections and inconsistent labels such as “The Boys,” “Blue Plume,” “Carlton Fields,” “Bridgecrossing,” “Fishhawk,” and “Riverview rental,” some of which may refer to property names versus addresses.
+
+Source-of-truth target state
+The target state is where all future edits happen in the app, not in Excel. The workbook should become either an archived reference file or a periodic import source for only a narrow category like bank balances, but not for full financial management.
+
+For that target, the app should support:
+
+Create, edit, delete transactions.
+
+Manual account snapshot entry and reconciliation.
+
+Property valuation updates by date.
+
+Category rule engine for recurring items like rent, HOA, insurance, pest control, and taxes.
+
+Audit log on edited imported rows.
+
+Automated local backups of the SQLite file before bulk edits/imports.
+
+A strong source-of-truth rule set would be:
+
+The database is canonical.
+
+Every mutation is timestamped.
+
+Reports are generated, never manually keyed in.
+
+Imports never overwrite silently; they propose matches and changes.
+
+Deletes are soft deletes unless manually purged.
+
+Build sequence
+Given your preference for full-file workflows and your current Node/Express comfort, I’d build this in phases instead of trying to do desktop packaging immediately.
+
+Suggested phases:
+
+Foundation
+
+Express app
+
+SQLite schema
+
+Basic layout and navigation
+
+Importer
+
+Upload workbook
+
+Parse sections
+
+Review screen for unmatched rows
+
+Save normalized data
+
+Ledger
+
+Transactions table
+
+Add/edit/delete transaction form
+
+Category and property assignment
+
+Reporting
+
+Monthly dashboard
+
+Property P&L
+
+Account balances
+
+Net worth and valuation summaries
+
+Source-of-truth hardening
+
+Reconciliation workflow
+
+Backup/restore
+
+Import conflict detection
+
+Audit trail
+
+Soft delete / undo
+
+Desktop packaging
+
+Electron or Tauri wrapper if you want an installable local app
+
+Recommendation
+My recommendation is to target a local ledger and rental-portfolio manager where Excel is used only for initial migration and occasional reference, while SQLite becomes the permanent source of truth. That approach fits the shape of your workbook, reduces formula breakage, and gives you a much cleaner long-term foundation for property reporting, taxes, and financial tracking.
+
+The next concrete step should be defining:
+
+your final table schema,
+
+your property-name normalization map,
+
+and the import rules for each workbook section.
+
+Would you like me to give you the exact MVP file structure and the full schema.sql for this Node/Express + SQLite app next?
+
+I would also like to store the leases
+
+Yes — and lease storage should be a first-class part of the app, not just an attachment field. Your workbook already shows recurring tenant-linked rent entries like “Rent from Turner,” “Rent from Parker,” “Rent from Connor,” “Rent from Nicole,” deposits, prorated rent, and rent changes by property, which makes leases a natural core record in the system.
+
+Lease model
+The right approach is to separate property, unit, tenant, and lease so you can handle both single-family rentals and multi-tenant situations like “The Boys,” where multiple named renters appear against the same property. The workbook suggests that some properties have one combined rent stream while others have multiple tenant-specific payments, so a lease model needs to support both patterns.
+
+Recommended core lease tables:
+
+tenants(id, first_name, last_name, full_name, phone, email, notes)
+
+units(id, property_id, unit_name, bedroom_label, is_active)
+
+leases(id, property_id, unit_id nullable, lease_name, start_date, end_date, rent_amount, security_deposit, pet_deposit, frequency, status, signed_date, notes)
+
+lease_tenants(id, lease_id, tenant_id, role, is_primary_signer)
+
+lease_documents(id, lease_id, file_name, file_path, file_type, uploaded_at)
+
+That structure lets you store:
+
+one tenant on one property,
+
+multiple tenants on one lease,
+
+lease renewals over time,
+
+and lease PDFs or scanned documents without mixing them into transaction rows.
+
+How leases relate
+Leases should connect directly to transactions so rent collection is not just a generic income line. In your workbook, entries like “Rent from Turner,” “Rent from Parker,” and “Rent from Connor” clearly indicate tenant-linked payment history, while other properties show flat rent entries like “Fishhawk 2,950.00 Rent” or “Bridgecrossing 3,100.00 Rent,” so the app should support both named-tenant and unnamed lease-linked rent records.
+
+I’d add these transaction fields:
+
+lease_id nullable
+
+tenant_id nullable
+
+txn_type such as rent, deposit, late_fee, repair, tax, insurance
+
+period_start nullable
+
+period_end nullable
+
+That allows the app to answer questions like:
+
+Which lease generated this payment?
+
+Is the payment full, partial, or prorated?
+
+Which tenant has paid this month?
+
+What deposits are still being held?
+
+Lease documents
+Since you want to store leases, the app should support both metadata and actual files. The workbook shows the financial side of tenancy, but it does not appear to store full lease agreements themselves, so the app should become the place where the lease file and the lease terms live together.
+
+Best practice:
+
+Store the PDF or image file in a local storage/leases/ folder.
+
+Store only the metadata and path in SQLite.
+
+Version the lease when renewed instead of overwriting the old one.
+
+Mark one lease as active and preserve old leases as historical records.
+
+A good lease record should include:
+
+lease start and end,
+
+monthly rent,
+
+deposit amount,
+
+pet fee/deposit,
+
+renewal terms,
+
+occupants,
+
+signed date,
+
+and uploaded contract files.
+That turns the app from a finance tracker into a real rental-management source of truth.
+
+Recommended additions
+Because your workbook includes deposits, rent changes, and tenant-specific collections, I would extend the source-of-truth design with a small rental-management layer. For example, there are deposit-style entries such as security deposit and last month’s rent alongside monthly rent streams, which means lease terms should drive expected payments rather than relying only on manual transaction entry.
+
+Add these useful tables:
+
+lease_charges(id, lease_id, charge_type, amount, frequency, start_date, end_date)
+
+lease_files(id, lease_id, kind, path, uploaded_at)
+
+move_in_move_out(id, lease_id, move_in_date, move_out_date, inspection_notes, deposit_disposition)
+
+payment_allocations(id, transaction_id, lease_charge_id, amount_applied)
+
+With that, you can support:
+
+expected monthly rent schedules,
+
+deposit tracking,
+
+unpaid balances,
+
+lease renewals,
+
+and move-out accounting.
+
+UI features
+If leases are part of the MVP, I’d add a Rental section with these screens:
+
+Properties list.
+
+Property detail page.
+
+Lease detail page.
+
+Tenant profile page.
+
+Lease document upload/view page.
+
+Rent roll page by month.
+
+That is especially useful for properties with named tenants and changing rents, because the workbook shows patterns like monthly rent from specific people and different totals across years for the same property. A lease detail page should show the signed lease info at the top, then tenant list, recurring charges, payment history, uploaded PDFs, and balance status underneath.
+
+Recommendation
+My recommendation is to expand the schema now rather than bolting leases on later. The workbook already contains enough tenant-linked payment evidence that the app should treat leases as a core object alongside properties and transactions, especially for “The Boys” / Carlton Fields / Blue Plume style recurring named-tenant rent history and for deposit-related entries on properties like Fishhawk and Bridgecrossing.
+
+The clean target becomes:
+
+properties = physical rental assets,
+
+tenants = people,
+
+leases = legal agreement terms,
+
+transactions = money movement,
+
+documents = signed files and supporting records.
+
+Would you like me to give you the full recommended schema next, including the lease tables merged into the earlier Node/Express + SQLite MVP design?
+
+what file is this going in? and am I making changes locally or live in git
+
+This change goes in your local project’s app.js, then you commit and push it to GitHub so Render deploys it. Your repo path is C:\Users\kevin\source\repos\financial-import-mvp, and your preference has been to work from the local files first, then push to the connected GitHub repo for Render deployment.
+
+File to edit
+Edit this file on your computer:
+
+text
+C:\Users\kevin\source\repos\financial-import-mvp\app.js
+The redirect-loop fix belongs in the GET /expenses/new route inside that file, because that route is what is sending the browser back to itself repeatedly. Based on the app structure you shared earlier, your routing and import logic are all in app.js.
+
+Where to make changes
+Make the change locally first, not directly “live” on Render. Render is typically deploying from your GitHub branch, so the normal workflow is: update local file → test locally if possible → git add / git commit / git push → let Render auto-deploy or trigger a deploy manually.
+
+Practical workflow
+Use this sequence:
+
+Open app.js locally.
+
+Replace the current /expenses/new route with the fixed version.
+
+Save the file.
+
+Commit and push to GitHub.
+
+Wait for Render to redeploy or trigger Manual Deploy → Deploy latest commit.
+
+Commands:
+
+powershell
+cd C:\Users\kevin\source\repos\financial-import-mvp
+git add app.js
+git commit -m "Fix add expense redirect loop"
+git push
+What not to do
+Do not try to edit Render directly unless you are using some separate live shell or dashboard-based editor, which your setup has not indicated. In your current workflow, the source of truth is your local repo and GitHub-backed deployment, not the live Render container.
+
+The exact target
+So the short answer is:
+
+File: app.js
+
+Edit location: the app.get('/expenses/new', ...) block
+
+Where to change it: locally on your PC in financial-import-mvp
+
+How it goes live: commit and push to GitHub, then Render deploys
+
+Paste your current /expenses/new block from app.js, and I’ll give you the exact full replacement with the filename label the way you prefer.
+
+received an error ==> Running 'node app.js'
+/opt/render/project/src/app.js:475
+});
+^
+SyntaxError: Unexpected token '}'
+at wrapSafe (node:internal/modules/cjs/loader:1743:18)
+at Module._compile (node:internal/modules/cjs/loader:1786:20)
+at Object..js (node:internal/modules/cjs/loader:1943:10)
+at Module.load (node:internal/modules/cjs/loader:1533:32)
+at Module._load (node:internal/modules/cjs/loader:1335:12)
+at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+at node:internal/main/run_main_module:33:47
+Node.js v24.14.1
+
+That error means app.js currently has a brace mismatch — almost always an extra } or a missing opening { earlier in the file. Since Render points to line 475 with });, the actual mistake is usually a few lines above that line, not necessarily on that exact line.
+
+What file to inspect
+Check your local file here:
+
+text
+C:\Users\kevin\source\repos\financial-import-mvp\app.js
+The bad edit is in app.js, and most likely in or near the route you just changed, probably the /expenses/new block or the route immediately before or after it. In JavaScript, Unexpected token '}' usually means one block was closed too many times or a matching opener was removed earlier.
+
+What likely happened
+A common mistake is turning this:
+
+js
+app.get('/expenses/new', (req, res) => {
+  // code
+});
+into something with one extra closing brace, like:
+
+js
+app.get('/expenses/new', (req, res) => {
+  // code
+  }
+});
+or closing the route twice. That exact pattern produces the kind of }); syntax error Render is showing.
+
+Fastest fix
+Open app.js in VS Code and go to about line 475. Then look upward for:
+
+an extra standalone }
+
+a }); that closes a route that was already closed
+
+an if (...) { / else { block that does not line up visually
+
+a pasted route block with one extra brace at the end.
+
+A correct route should look like this shape:
+
+js
+app.get('/expenses/new', (req, res) => {
+  const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
+  const latestImportId = latestImport ? latestImport.id : null;
+
+  const properties = latestImportId
+    ? db.prepare(`
+        SELECT property_name
+        FROM (
+          SELECT DISTINCT address AS property_name
+          FROM property_values
+          WHERE import_id = ? AND address IS NOT NULL AND TRIM(address) <> ''
+          UNION
+          SELECT DISTINCT property_name
+          FROM transactions
+          WHERE import_id = ? AND property_name IS NOT NULL AND TRIM(property_name) <> ''
+        )
+        ORDER BY property_name
+      `).all(latestImportId, latestImportId)
+    : [];
+
+  res.render('add-expense', {
+    latestImportId,
+    properties,
+    success: req.query.success || '',
+    error: req.query.error || (latestImportId ? '' : 'Please import a workbook before adding expenses.')
+  });
+});
+That route opens once with { and closes once with });.
+
+Best next step
+Paste about 40–60 lines around line 475 from your current app.js, especially the /expenses/new route and the route just before it. With that snippet, I can point to the exact extra brace and rewrite the full block cleanly.
+
+here it is can you fix it?
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+const XLSX = require('xlsx');
+const Database = require('better-sqlite3');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const dataDir = path.join(__dirname, 'data');
+const uploadsDir = path.join(__dirname, 'uploads');
+
+fs.mkdirSync(dataDir, { recursive: true });
+fs.mkdirSync(uploadsDir, { recursive: true });
+
+const db = new Database(path.join(dataDir, 'financials.db'));
+db.pragma('journal_mode = WAL');
+
+function initDb() {
+db.exec(`
+CREATE TABLE IF NOT EXISTS imports (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+filename TEXT NOT NULL,
+imported_at TEXT NOT NULL,
+sheet_count INTEGER DEFAULT 0,
+row_count INTEGER DEFAULT 0,
+notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS account_snapshots (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+import_id INTEGER NOT NULL,
+snapshot_date TEXT,
+bank TEXT,
+account_type TEXT,
+account_num TEXT,
+routing TEXT,
+balance REAL,
+source_sheet TEXT,
+FOREIGN KEY(import_id) REFERENCES imports(id)
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+import_id INTEGER NOT NULL,
+txn_date TEXT,
+property_name TEXT,
+amount REAL,
+reason TEXT,
+income_amount REAL,
+expense_amount REAL,
+year_tag INTEGER,
+source_sheet TEXT,
+source_category TEXT,
+FOREIGN KEY(import_id) REFERENCES imports(id)
+);
+
+CREATE TABLE IF NOT EXISTS property_values (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+import_id INTEGER NOT NULL,
+address TEXT,
+purchased REAL,
+estimate REAL,
+snapshot_date TEXT,
+profit_loss REAL,
+alt_estimate REAL,
+alt_snapshot_date TEXT,
+FOREIGN KEY(import_id) REFERENCES imports(id)
+);
+
+CREATE TABLE IF NOT EXISTS import_issues (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+import_id INTEGER NOT NULL,
+sheet_name TEXT,
+issue_type TEXT,
+row_number INTEGER,
+raw_payload TEXT,
+message TEXT,
+FOREIGN KEY(import_id) REFERENCES imports(id)
+);
+`);
+}
+initDb();
+
+const storage = multer.diskStorage({
+destination: (_, __, cb) => cb(null, uploadsDir),
+filename: (_, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
+});
+const upload = multer({ storage });
+
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+function excelDateToIso(value) {
+if (value == null || value === '') return null;
+if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
+
+if (typeof value === 'number') {
+const parsed = XLSX.SSF.parse_date_code(value);
+if (!parsed) return null;
+const d = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+return d.toISOString().slice(0, 10);
+}
+
+const text = String(value).trim();
+const d = new Date(text);
+if (!isNaN(d)) return d.toISOString().slice(0, 10);
+return text;
+}
+
+function n(value) {
+if (value == null || value === '') return null;
+if (typeof value === 'number' && !Number.isNaN(value)) return value;
+
+let text = String(value).trim();
+if (!text) return null;
+
+const neg = text.includes('(') && text.includes(')');
+text = text
+.replace(/\$/g, '')
+.replace(/,/g, '')
+.replace(/\s+/g, '')
+.replace(/[()]/g, '');
+
+const parsed = Number(text);
+if (Number.isNaN(parsed)) return null;
+
+return neg ? -Math.abs(parsed) : parsed;
+}
+
+function s(value) {
+if (value == null) return null;
+const text = String(value).trim();
+return text === '' ? null : text;
+}
+
+function normalizePropertyName(name) {
+if (!name) return null;
+
+const raw = String(name).trim();
+const map = {
+'The boys': 'The Boys',
+'The boys ': 'The Boys',
+'The Boys ': 'The Boys',
+'Riverview boys': 'The Boys',
+'Riverview Boys': 'The Boys',
+'Riverview': 'Carlton Fields Dr',
+'Riverview ': 'Carlton Fields Dr',
+'Riverview rental': 'Carlton Fields Dr',
+'Fishhawk': 'Bridgecrossing Dr',
+'Fishhawk ': 'Bridgecrossing Dr',
+'Bridgecrossing': 'Bridgecrossing Dr',
+'Bridge Crossing': 'Bridgecrossing Dr',
+'Bloomingdale': 'Brookville Dr',
+'Blue Plume': 'Blue Plume Ct',
+'Blue Plume ': 'Blue Plume Ct',
+'SouthCreek': 'Blue Plume Ct',
+'SouthCreek ': 'Blue Plume Ct',
+'Carlton Fields': 'Carlton Fields Dr'
+};
+
+return map[raw] || raw;
+}
+
+function detectYearTag(sheetName) {
+const match = String(sheetName).match(/(20)?(\d{2})$/);
+if (!match) return null;
+
+const yy = Number(match[2]);
+return yy >= 70 ? 1900 + yy : 2000 + yy;
+}
+
+function addIssue(importId, sheet, type, row, payload, message) {
+db.prepare(`
+INSERT INTO import_issues (
+import_id, sheet_name, issue_type, row_number, raw_payload, message
+) VALUES (?, ?, ?, ?, ?, ?)
+`).run(importId, sheet, type, row, JSON.stringify(payload ?? {}), message);
+}
+
+function getCanonicalPropertySet(workbook) {
+const set = new Set();
+
+const manual = [
+'Blue Plume Ct',
+'Bridgecrossing Dr',
+'Brookville Dr',
+'Carlton Fields Dr',
+'The Boys',
+'Vistazo',
+'Sedona'
+];
+manual.forEach(name => set.add(normalizePropertyName(name)));
+
+const sheetName = workbook.SheetNames.find(name => /^Property Values$/i.test(name));
+if (!sheetName) return set;
+
+const ws = workbook.Sheets[sheetName];
+const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
+
+for (const r of rows) {
+const raw = s(r['Address '] || r['Address']);
+const normalized = normalizePropertyName(raw);
+if (normalized) set.add(normalized);
+}
+
+return set;
+}
+
+function sanitizeImportedPropertyName(name, validProperties) {
+const normalized = normalizePropertyName(name);
+if (!normalized) return null;
+return validProperties.has(normalized) ? normalized : null;
+}
+
+function getLatestImportId() {
+const latest = db.prepare('SELECT id FROM imports ORDER BY id DESC LIMIT 1').get();
+return latest ? latest.id : null;
+}
+
+function importWorkbook(filePath, originalName) {
+const workbook = XLSX.readFile(filePath, { cellDates: true });
+const validProperties = getCanonicalPropertySet(workbook);
+
+const importInfo = db.prepare(`
+INSERT INTO imports (filename, imported_at, sheet_count, row_count, notes)
+VALUES (?, datetime('now'), ?, ?, ?)
+`).run(originalName, workbook.SheetNames.length, 0, 'Initial import');
+
+const importId = importInfo.lastInsertRowid;
+
+const insertAccount = db.prepare(`
+INSERT INTO account_snapshots (
+import_id, snapshot_date, bank, account_type, account_num, routing, balance, source_sheet
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+const insertTxn = db.prepare(`
+INSERT INTO transactions (
+import_id, txn_date, property_name, amount, reason,
+income_amount, expense_amount, year_tag, source_sheet, source_category
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+const insertValue = db.prepare(`
+INSERT INTO property_values (
+import_id, address, purchased, estimate, snapshot_date,
+profit_loss, alt_estimate, alt_snapshot_date
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+let rowCount = 0;
+
+const ignoredSheets = new Set(['Cleanup Notes']);
+
+for (const sheetName of workbook.SheetNames) {
+if (ignoredSheets.has(sheetName)) {
+continue;
+}
+
+const ws = workbook.Sheets[sheetName];
+const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
+
+if (/^Accounts$/i.test(sheetName)) {
+for (let i = 0; i < rows.length; i++) {
+const r = rows[i];
+
+const rawBalance = r['Balance'] ?? r['Balance '] ?? r['BALANCE'] ?? null;
+
+if (!r['DATE'] && !r['Bank'] && rawBalance == null) continue;
+if (!r['Bank'] || r['Bank'] === 'Bank') continue;
+
+if (!r['Acct type'] && !r['ACCT NUM'] && !r['ROUTING'] && !r['Bank']) continue;
+
+const balance = n(rawBalance);
+if (balance == null) {
+addIssue(
+importId,
+sheetName,
+'invalid_account_balance',
+i + 2,
+r,
+`Balance could not be parsed from value: ${rawBalance}`
+);
+continue;
+}
+
+insertAccount.run(
+importId,
+excelDateToIso(r['DATE']),
+s(r['Bank']),
+s(r['Acct type']),
+s(r['ACCT NUM']),
+s(r['ROUTING']),
+balance,
+sheetName
+);
+
+rowCount++;
+}
+continue;
+}
+
+if (/^Payments\s\d+/i.test(sheetName) || /^Taxes\s\d+/i.test(sheetName)) {
+const yearTag = detectYearTag(sheetName);
+const baseCategory = /^Taxes/i.test(sheetName) ? 'taxes' : 'payments';
+
+for (let i = 0; i < rows.length; i++) {
+const r = rows[i];
+const date = r['Date'] || r['DATE'];
+const propertyLabel = r['Property '] || r['Property'] || null;
+let amount = n(r['Amount ']) ?? n(r['Amount']);
+const reason = r['Reason '] || r['Reason'] || null;
+
+const incomeKey = Object.keys(r).find(k => String(k).startsWith('Income'));
+const expenseKey = Object.keys(r).find(k => String(k).startsWith('Expenses'));
+
+const income = incomeKey ? n(r[incomeKey]) : null;
+const expense = expenseKey ? n(r[expenseKey]) : null;
+
+if (!date && !propertyLabel && amount == null && !reason) continue;
+
+if (amount == null && income != null) amount = income;
+if (amount == null && expense != null) amount = expense;
+
+if (amount == null) {
+addIssue(importId, sheetName, 'invalid_transaction_amount', i + 2, r, 'Amount could not be parsed');
+continue;
+}
+
+const safeProperty = sanitizeImportedPropertyName(propertyLabel, validProperties);
+
+let categoryLabel = baseCategory;
+const nonPropertySet = new Set(['Taxes', 'All', 'Expense', 'Charity', 'Vacation', 'Boca', 'Singer', 'Busch G']);
+
+if (propertyLabel && !safeProperty) {
+const trimmed = String(propertyLabel).trim();
+if (nonPropertySet.has(trimmed)) {
+categoryLabel = trimmed;
+} else {
+addIssue(
+importId,
+sheetName,
+'unmatched_property_name',
+i + 2,
+r,
+`Ignored non-portfolio property label: ${propertyLabel}`
+);
+}
+}
+
+insertTxn.run(
+importId,
+excelDateToIso(date),
+safeProperty,
+amount,
+s(reason),
+income,
+expense,
+yearTag,
+sheetName,
+categoryLabel
+);
+
+rowCount++;
+}
+continue;
+}
+
+if (/^Property Values$/i.test(sheetName)) {
+for (let i = 0; i < rows.length; i++) {
+const r = rows[i];
+if (!r['Address '] && !r['Purchased '] && !r['Estimate ']) continue;
+
+insertValue.run(
+importId,
+normalizePropertyName(s(r['Address '] || r['Address'])),
+n(r['Purchased ']),
+n(r['Estimate ']),
+excelDateToIso(r['Unnamed: 3']),
+n(r['Profit/Loss']),
+n(r['Unnamed: 5']),
+excelDateToIso(r['Unnamed: 6'])
+);
+
+rowCount++;
+}
+continue;
+}
+
+addIssue(importId, sheetName, 'unmapped_sheet', null, null, `Sheet "${sheetName}" was not imported.`);
+}
+
+db.prepare('UPDATE imports SET row_count = ? WHERE id = ?').run(rowCount, importId);
+return importId;
+}
+
+app.get('/', (req, res) => {
+const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
+
+const stats = latestImport
+? {
+accounts: db.prepare('SELECT COUNT(*) AS c FROM account_snapshots WHERE import_id = ?').get(latestImport.id).c,
+transactions: db.prepare('SELECT COUNT(*) AS c FROM transactions WHERE import_id = ?').get(latestImport.id).c,
+properties: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
+values: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
+issues: db.prepare('SELECT COUNT(*) AS c FROM import_issues WHERE import_id = ?').get(latestImport.id).c
+}
+: null;
+
+const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 10').all();
+res.render('index', { latestImport, stats, recentImports });
+});
+
+app.post('/import', upload.single('financialFile'), (req, res) => {
+if (!req.file) return res.status(400).send('No file uploaded');
+
+const importId = importWorkbook(req.file.path, req.file.originalname);
+res.redirect(`/imports/${importId}`);
+});
+
+app.get('/expenses/new', (req, res) => {
+const latestImportId = getLatestImportId();
+
+const properties = latestImportId
+? db.prepare(`
+SELECT property_name
+FROM (
+SELECT DISTINCT address AS property_name
+FROM property_values
+WHERE import_id = ? AND address IS NOT NULL AND TRIM(address) <> ''
+UNION
+SELECT DISTINCT property_name
+FROM transactions
+WHERE import_id = ? AND property_name IS NOT NULL AND TRIM(property_name) <> ''
+)
+ORDER BY property_name
+`).all(latestImportId, latestImportId)
+: [];
+
+res.render('add-expense', {
+latestImportId,
+properties,
+success: req.query.success || '',
+error: req.query.error || (latestImportId ? '' : 'Please import a workbook before adding expenses.')
+});
+});
+
+if (!txnDate || !propertyName || !reason || amountValue == null) {
+return res.redirect('/expenses/new?error=' + encodeURIComponent('Date, property, amount, and reason are required.'));
+}
+
+const expenseAmount = Math.abs(amountValue);
+
+db.prepare(`
+INSERT INTO transactions (
+import_id, txn_date, property_name, amount, reason,
+income_amount, expense_amount, year_tag, source_sheet, source_category
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`).run(
+latestImportId,
+txnDate,
+normalizePropertyName(propertyName),
+-expenseAmount,
+reason,
+null,
+expenseAmount,
+null,
+'Manual Entry',
+category || 'manual-expense'
+);
+
+res.redirect('/expenses/new?success=' + encodeURIComponent('Expense saved.'));
+});
+
+app.get('/sales/new', (req, res) => {
+const latestImportId = getLatestImportId();
+
+const properties = latestImportId
+? db.prepare(`
+SELECT DISTINCT address AS property_name
+FROM property_values
+WHERE import_id = ? AND address IS NOT NULL AND TRIM(address) <> ''
+ORDER BY address
+`).all(latestImportId)
+: [];
+
+res.render('add-sale', {
+properties,
+success: req.query.success || '',
+error: req.query.error || ''
+});
+});
+
+app.post('/sales', (req, res) => {
+const latestImportId = getLatestImportId();
+
+if (!latestImportId) {
+return res.redirect('/sales/new?error=' + encodeURIComponent('Please import a workbook before recording a sale.'));
+}
+
+const txnDate = s(req.body.txn_date);
+const propertyName = s(req.body.property_name);
+const salePrice = n(req.body.sale_price);
+const reason = s(req.body.reason) || 'Property sale';
+
+if (!txnDate || !propertyName || salePrice == null) {
+return res.redirect('/sales/new?error=' + encodeURIComponent('Sale date, property, and sale price are required.'));
+}
+
+db.prepare(`
+INSERT INTO transactions (
+import_id, txn_date, property_name, amount, reason,
+income_amount, expense_amount, year_tag, source_sheet, source_category
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`).run(
+latestImportId,
+txnDate,
+normalizePropertyName(propertyName),
+salePrice,
+reason,
+salePrice,
+null,
+null,
+'Manual Sale',
+'manual-sale'
+);
+
+res.redirect('/sales/new?success=' + encodeURIComponent('Sale saved.'));
+});
+
+app.get('/imports/:id', (req, res) => {
+const importId = Number(req.params.id);
+const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(importId);
+
+if (!imp) return res.status(404).send('Import not found');
+
+const accounts = db.prepare(`
+SELECT * FROM account_snapshots
+WHERE import_id = ?
+ORDER BY snapshot_date DESC, bank
+`).all(importId);
+
+const properties = db.prepare(`
+SELECT
+property_name,
+COUNT(*) AS txn_count,
+ROUND(SUM(COALESCE(income_amount, CASE WHEN amount > 0 THEN amount ELSE 0 END)), 2) AS income_total,
+ROUND(ABS(SUM(COALESCE(expense_amount, CASE WHEN amount < 0 THEN amount ELSE 0 END))), 2) AS expense_total,
+ROUND(SUM(amount), 2) AS net_total
+FROM transactions
+WHERE import_id = ? AND property_name IS NOT NULL
+GROUP BY property_name
+ORDER BY net_total DESC
+`).all(importId);
+
+const propertyValues = db.prepare(`
+SELECT * FROM property_values
+WHERE import_id = ?
+ORDER BY address
+`).all(importId);
+
+const issues = db.prepare(`
+SELECT * FROM import_issues
+WHERE import_id = ?
+ORDER BY sheet_name, row_number
+LIMIT 100
+`).all(importId);
+
+res.render('import-detail', { imp, accounts, properties, propertyValues, issues });
+});
+
+app.listen(PORT, () => {
+console.log(`Financial importer running on http://localhost:${PORT}`);
+});
+
+Yes — the syntax error is because your app.post('/expenses', ...) route is missing its opening line, so the validation and insert code is sitting loose at the top level. That leaves an orphan }); later, which is why Node reports Unexpected token '}'. JavaScript throws that error when braces are unbalanced, and in your pasted file the broken section is the expense POST block immediately after app.get('/expenses/new', ...).
+
+What to replace
+Replace your current app.js with this full fixed file in:
+
+text
+C:\Users\kevin\source\repos\financial-import-mvp\app.js
+This version restores the missing app.post('/expenses', ...) route and keeps the corrected non-looping GET /expenses/new behavior.
+
+app.js
+js
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+const XLSX = require('xlsx');
+const Database = require('better-sqlite3');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const dataDir = path.join(__dirname, 'data');
+const uploadsDir = path.join(__dirname, 'uploads');
+
+fs.mkdirSync(dataDir, { recursive: true });
+fs.mkdirSync(uploadsDir, { recursive: true });
+
+const db = new Database(path.join(dataDir, 'financials.db'));
+db.pragma('journal_mode = WAL');
+
+function initDb() {
+  db.exec(`
+CREATE TABLE IF NOT EXISTS imports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  filename TEXT NOT NULL,
+  imported_at TEXT NOT NULL,
+  sheet_count INTEGER DEFAULT 0,
+  row_count INTEGER DEFAULT 0,
+  notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS account_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  import_id INTEGER NOT NULL,
+  snapshot_date TEXT,
+  bank TEXT,
+  account_type TEXT,
+  account_num TEXT,
+  routing TEXT,
+  balance REAL,
+  source_sheet TEXT,
+  FOREIGN KEY(import_id) REFERENCES imports(id)
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  import_id INTEGER NOT NULL,
+  txn_date TEXT,
+  property_name TEXT,
+  amount REAL,
+  reason TEXT,
+  income_amount REAL,
+  expense_amount REAL,
+  year_tag INTEGER,
+  source_sheet TEXT,
+  source_category TEXT,
+  FOREIGN KEY(import_id) REFERENCES imports(id)
+);
+
+CREATE TABLE IF NOT EXISTS property_values (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  import_id INTEGER NOT NULL,
+  address TEXT,
+  purchased REAL,
+  estimate REAL,
+  snapshot_date TEXT,
+  profit_loss REAL,
+  alt_estimate REAL,
+  alt_snapshot_date TEXT,
+  FOREIGN KEY(import_id) REFERENCES imports(id)
+);
+
+CREATE TABLE IF NOT EXISTS import_issues (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  import_id INTEGER NOT NULL,
+  sheet_name TEXT,
+  issue_type TEXT,
+  row_number INTEGER,
+  raw_payload TEXT,
+  message TEXT,
+  FOREIGN KEY(import_id) REFERENCES imports(id)
+);
+`);
+}
+initDb();
+
+const storage = multer.diskStorage({
+  destination: (_, __, cb) => cb(null, uploadsDir),
+  filename: (_, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
+});
+const upload = multer({ storage });
+
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+function excelDateToIso(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
+
+  if (typeof value === 'number') {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (!parsed) return null;
+    const d = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+    return d.toISOString().slice(0, 10);
+  }
+
+  const text = String(value).trim();
+  const d = new Date(text);
+  if (!isNaN(d)) return d.toISOString().slice(0, 10);
+  return text;
+}
+
+function n(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number' && !Number.isNaN(value)) return value;
+
+  let text = String(value).trim();
+  if (!text) return null;
+
+  const neg = text.includes('(') && text.includes(')');
+  text = text
+    .replace(/\$/g, '')
+    .replace(/,/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[()]/g, '');
+
+  const parsed = Number(text);
+  if (Number.isNaN(parsed)) return null;
+
+  return neg ? -Math.abs(parsed) : parsed;
+}
+
+function s(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text === '' ? null : text;
+}
+
+function normalizePropertyName(name) {
+  if (!name) return null;
+
+  const raw = String(name).trim();
+  const map = {
+    'The boys': 'The Boys',
+    'The boys ': 'The Boys',
+    'The Boys ': 'The Boys',
+    'Riverview boys': 'The Boys',
+    'Riverview Boys': 'The Boys',
+    'Riverview': 'Carlton Fields Dr',
+    'Riverview ': 'Carlton Fields Dr',
+    'Riverview rental': 'Carlton Fields Dr',
+    'Fishhawk': 'Bridgecrossing Dr',
+    'Fishhawk ': 'Bridgecrossing Dr',
+    'Bridgecrossing': 'Bridgecrossing Dr',
+    'Bridge Crossing': 'Bridgecrossing Dr',
+    'Bloomingdale': 'Brookville Dr',
+    'Blue Plume': 'Blue Plume Ct',
+    'Blue Plume ': 'Blue Plume Ct',
+    'SouthCreek': 'Blue Plume Ct',
+    'SouthCreek ': 'Blue Plume Ct',
+    'Carlton Fields': 'Carlton Fields Dr'
+  };
+
+  return map[raw] || raw;
+}
+
+function detectYearTag(sheetName) {
+  const match = String(sheetName).match(/(20)?(\d{2})$/);
+  if (!match) return null;
+
+  const yy = Number(match[2]);
+  return yy >= 70 ? 1900 + yy : 2000 + yy;
+}
+
+function addIssue(importId, sheet, type, row, payload, message) {
+  db.prepare(`
+    INSERT INTO import_issues (
+      import_id, sheet_name, issue_type, row_number, raw_payload, message
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `).run(importId, sheet, type, row, JSON.stringify(payload ?? {}), message);
+}
+
+function getCanonicalPropertySet(workbook) {
+  const set = new Set();
+
+  const manual = [
+    'Blue Plume Ct',
+    'Bridgecrossing Dr',
+    'Brookville Dr',
+    'Carlton Fields Dr',
+    'The Boys',
+    'Vistazo',
+    'Sedona'
+  ];
+  manual.forEach(name => set.add(normalizePropertyName(name)));
+
+  const sheetName = workbook.SheetNames.find(name => /^Property Values$/i.test(name));
+  if (!sheetName) return set;
+
+  const ws = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
+
+  for (const r of rows) {
+    const raw = s(r['Address '] || r['Address']);
+    const normalized = normalizePropertyName(raw);
+    if (normalized) set.add(normalized);
+  }
+
+  return set;
+}
+
+function sanitizeImportedPropertyName(name, validProperties) {
+  const normalized = normalizePropertyName(name);
+  if (!normalized) return null;
+  return validProperties.has(normalized) ? normalized : null;
+}
+
+function getLatestImportId() {
+  const latest = db.prepare('SELECT id FROM imports ORDER BY id DESC LIMIT 1').get();
+  return latest ? latest.id : null;
+}
+
+function importWorkbook(filePath, originalName) {
+  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  const validProperties = getCanonicalPropertySet(workbook);
+
+  const importInfo = db.prepare(`
+    INSERT INTO imports (filename, imported_at, sheet_count, row_count, notes)
+    VALUES (?, datetime('now'), ?, ?, ?)
+  `).run(originalName, workbook.SheetNames.length, 0, 'Initial import');
+
+  const importId = importInfo.lastInsertRowid;
+
+  const insertAccount = db.prepare(`
+    INSERT INTO account_snapshots (
+      import_id, snapshot_date, bank, account_type, account_num, routing, balance, source_sheet
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertTxn = db.prepare(`
+    INSERT INTO transactions (
+      import_id, txn_date, property_name, amount, reason,
+      income_amount, expense_amount, year_tag, source_sheet, source_category
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertValue = db.prepare(`
+    INSERT INTO property_values (
+      import_id, address, purchased, estimate, snapshot_date,
+      profit_loss, alt_estimate, alt_snapshot_date
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  let rowCount = 0;
+
+  const ignoredSheets = new Set(['Cleanup Notes']);
+
+  for (const sheetName of workbook.SheetNames) {
+    if (ignoredSheets.has(sheetName)) {
+      continue;
+    }
+
+    const ws = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
+
+    if (/^Accounts$/i.test(sheetName)) {
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+
+        const rawBalance = r['Balance'] ?? r['Balance '] ?? r['BALANCE'] ?? null;
+
+        if (!r['DATE'] && !r['Bank'] && rawBalance == null) continue;
+        if (!r['Bank'] || r['Bank'] === 'Bank') continue;
+
+        if (!r['Acct type'] && !r['ACCT NUM'] && !r['ROUTING'] && !r['Bank']) continue;
+
+        const balance = n(rawBalance);
+        if (balance == null) {
+          addIssue(
+            importId,
+            sheetName,
+            'invalid_account_balance',
+            i + 2,
+            r,
+            `Balance could not be parsed from value: ${rawBalance}`
+          );
+          continue;
+        }
+
+        insertAccount.run(
+          importId,
+          excelDateToIso(r['DATE']),
+          s(r['Bank']),
+          s(r['Acct type']),
+          s(r['ACCT NUM']),
+          s(r['ROUTING']),
+          balance,
+          sheetName
+        );
+
+        rowCount++;
+      }
+      continue;
+    }
+
+    if (/^Payments\s\d+/i.test(sheetName) || /^Taxes\s\d+/i.test(sheetName)) {
+      const yearTag = detectYearTag(sheetName);
+      const baseCategory = /^Taxes/i.test(sheetName) ? 'taxes' : 'payments';
+
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        const date = r['Date'] || r['DATE'];
+        const propertyLabel = r['Property '] || r['Property'] || null;
+        let amount = n(r['Amount ']) ?? n(r['Amount']);
+        const reason = r['Reason '] || r['Reason'] || null;
+
+        const incomeKey = Object.keys(r).find(k => String(k).startsWith('Income'));
+        const expenseKey = Object.keys(r).find(k => String(k).startsWith('Expenses'));
+
+        const income = incomeKey ? n(r[incomeKey]) : null;
+        const expense = expenseKey ? n(r[expenseKey]) : null;
+
+        if (!date && !propertyLabel && amount == null && !reason) continue;
+
+        if (amount == null && income != null) amount = income;
+        if (amount == null && expense != null) amount = expense;
+
+        if (amount == null) {
+          addIssue(importId, sheetName, 'invalid_transaction_amount', i + 2, r, 'Amount could not be parsed');
+          continue;
+        }
+
+        const safeProperty = sanitizeImportedPropertyName(propertyLabel, validProperties);
+
+        let categoryLabel = baseCategory;
+        const nonPropertySet = new Set(['Taxes', 'All', 'Expense', 'Charity', 'Vacation', 'Boca', 'Singer', 'Busch G']);
+
+        if (propertyLabel && !safeProperty) {
+          const trimmed = String(propertyLabel).trim();
+          if (nonPropertySet.has(trimmed)) {
+            categoryLabel = trimmed;
+          } else {
+            addIssue(
+              importId,
+              sheetName,
+              'unmatched_property_name',
+              i + 2,
+              r,
+              `Ignored non-portfolio property label: ${propertyLabel}`
+            );
+          }
+        }
+
+        insertTxn.run(
+          importId,
+          excelDateToIso(date),
+          safeProperty,
+          amount,
+          s(reason),
+          income,
+          expense,
+          yearTag,
+          sheetName,
+          categoryLabel
+        );
+
+        rowCount++;
+      }
+      continue;
+    }
+
+    if (/^Property Values$/i.test(sheetName)) {
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r['Address '] && !r['Purchased '] && !r['Estimate ']) continue;
+
+        insertValue.run(
+          importId,
+          normalizePropertyName(s(r['Address '] || r['Address'])),
+          n(r['Purchased ']),
+          n(r['Estimate ']),
+          excelDateToIso(r['Unnamed: 3']),
+          n(r['Profit/Loss']),
+          n(r['Unnamed: 5']),
+          excelDateToIso(r['Unnamed: 6'])
+        );
+
+        rowCount++;
+      }
+      continue;
+    }
+
+    addIssue(importId, sheetName, 'unmapped_sheet', null, null, `Sheet "${sheetName}" was not imported.`);
+  }
+
+  db.prepare('UPDATE imports SET row_count = ? WHERE id = ?').run(rowCount, importId);
+  return importId;
+}
+
+app.get('/', (req, res) => {
+  const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
+
+  const stats = latestImport
+    ? {
+        accounts: db.prepare('SELECT COUNT(*) AS c FROM account_snapshots WHERE import_id = ?').get(latestImport.id).c,
+        transactions: db.prepare('SELECT COUNT(*) AS c FROM transactions WHERE import_id = ?').get(latestImport.id).c,
+        properties: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
+        values: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
+        issues: db.prepare('SELECT COUNT(*) AS c FROM import_issues WHERE import_id = ?').get(latestImport.id).c
+      }
+    : null;
+
+  const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 10').all();
+  res.render('index', { latestImport, stats, recentImports });
+});
+
+app.post('/import', upload.single('financialFile'), (req, res) => {
+  if (!req.file) return res.status(400).send('No file uploaded');
+
+  const importId = importWorkbook(req.file.path, req.file.originalname);
+  res.redirect(`/imports/${importId}`);
+});
+
+app.get('/expenses/new', (req, res) => {
+  const latestImportId = getLatestImportId();
+
+  const properties = latestImportId
+    ? db.prepare(`
+        SELECT property_name
+        FROM (
+          SELECT DISTINCT address AS property_name
+          FROM property_values
+          WHERE import_id = ? AND address IS NOT NULL AND TRIM(address) <> ''
+          UNION
+          SELECT DISTINCT property_name
+          FROM transactions
+          WHERE import_id = ? AND property_name IS NOT NULL AND TRIM(property_name) <> ''
+        )
+        ORDER BY property_name
+      `).all(latestImportId, latestImportId)
+    : [];
+
+  res.render('add-expense', {
+    latestImportId,
+    properties,
+    success: req.query.success || '',
+    error: req.query.error || (latestImportId ? '' : 'Please import a workbook before adding expenses.')
+  });
+});
+
+app.post('/expenses', (req, res) => {
+  const latestImportId = getLatestImportId();
+
+  if (!latestImportId) {
+    return res.redirect('/expenses/new?error=' + encodeURIComponent('Please import a workbook before adding expenses.'));
+  }
+
+  const txnDate = s(req.body.txn_date);
+  const propertyName = s(req.body.property_name);
+  const amountValue = n(req.body.amount);
+  const reason = s(req.body.reason);
+  const category = s(req.body.category);
+
+  if (!txnDate || !propertyName || !reason || amountValue == null) {
+    return res.redirect('/expenses/new?error=' + encodeURIComponent('Date, property, amount, and reason are required.'));
+  }
+
+  const expenseAmount = Math.abs(amountValue);
+
+  db.prepare(`
+    INSERT INTO transactions (
+      import_id, txn_date, property_name, amount, reason,
+      income_amount, expense_amount, year_tag, source_sheet, source_category
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    latestImportId,
+    txnDate,
+    normalizePropertyName(propertyName),
+    -expenseAmount,
+    reason,
+    null,
+    expenseAmount,
+    null,
+    'Manual Entry',
+    category || 'manual-expense'
+  );
+
+  res.redirect('/expenses/new?success=' + encodeURIComponent('Expense saved.'));
+});
+
+app.get('/sales/new', (req, res) => {
+  const latestImportId = getLatestImportId();
+
+  const properties = latestImportId
+    ? db.prepare(`
+        SELECT DISTINCT address AS property_name
+        FROM property_values
+        WHERE import_id = ? AND address IS NOT NULL AND TRIM(address) <> ''
+        ORDER BY address
+      `).all(latestImportId)
+    : [];
+
+  res.render('add-sale', {
+    properties,
+    success: req.query.success || '',
+    error: req.query.error || ''
+  });
+});
+
+app.post('/sales', (req, res) => {
+  const latestImportId = getLatestImportId();
+
+  if (!latestImportId) {
+    return res.redirect('/sales/new?error=' + encodeURIComponent('Please import a workbook before recording a sale.'));
+  }
+
+  const txnDate = s(req.body.txn_date);
+  const propertyName = s(req.body.property_name);
+  const salePrice = n(req.body.sale_price);
+  const reason = s(req.body.reason) || 'Property sale';
+
+  if (!txnDate || !propertyName || salePrice == null) {
+    return res.redirect('/sales/new?error=' + encodeURIComponent('Sale date, property, and sale price are required.'));
+  }
+
+  db.prepare(`
+    INSERT INTO transactions (
+      import_id, txn_date, property_name, amount, reason,
+      income_amount, expense_amount, year_tag, source_sheet, source_category
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    latestImportId,
+    txnDate,
+    normalizePropertyName(propertyName),
+    salePrice,
+    reason,
+    salePrice,
+    null,
+    null,
+    'Manual Sale',
+    'manual-sale'
+  );
+
+  res.redirect('/sales/new?success=' + encodeURIComponent('Sale saved.'));
+});
+
+app.get('/imports/:id', (req, res) => {
+  const importId = Number(req.params.id);
+  const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(importId);
+
+  if (!imp) return res.status(404).send('Import not found');
+
+  const accounts = db.prepare(`
+    SELECT * FROM account_snapshots
+    WHERE import_id = ?
+    ORDER BY snapshot_date DESC, bank
+  `).all(importId);
+
+  const properties = db.prepare(`
+    SELECT
+      property_name,
+      COUNT(*) AS txn_count,
+      ROUND(SUM(COALESCE(income_amount, CASE WHEN amount > 0 THEN amount ELSE 0 END)), 2) AS income_total,
+      ROUND(ABS(SUM(COALESCE(expense_amount, CASE WHEN amount < 0 THEN amount ELSE 0 END))), 2) AS expense_total,
+      ROUND(SUM(amount), 2) AS net_total
+    FROM transactions
+    WHERE import_id = ? AND property_name IS NOT NULL
+    GROUP BY property_name
+    ORDER BY net_total DESC
+  `).all(importId);
+
+  const propertyValues = db.prepare(`
+    SELECT * FROM property_values
+    WHERE import_id = ?
+    ORDER BY address
+  `).all(importId);
+
+  const issues = db.prepare(`
+    SELECT * FROM import_issues
+    WHERE import_id = ?
+    ORDER BY sheet_name, row_number
+    LIMIT 100
+  `).all(importId);
+
+  res.render('import-detail', { imp, accounts, properties, propertyValues, issues });
+});
+
+app.listen(PORT, () => {
+  console.log(`Financial importer running on http://localhost:${PORT}`);
+});
+end of app.js
+What was broken
+In your pasted file, this part was missing:
+
+js
+app.post('/expenses', (req, res) => {
+and these variables were also missing from scope:
+
+js
+const latestImportId = getLatestImportId();
+const txnDate = s(req.body.txn_date);
+const propertyName = s(req.body.property_name);
+const amountValue = n(req.body.amount);
+const reason = s(req.body.reason);
+const category = s(req.body.category);
+Without that route wrapper, Node reached the closing }); later with no matching opener, which caused the syntax error on Render.
+
+Next commands
+After saving app.js, run:
+
+powershell
+cd C:\Users\kevin\source\repos\financial-import-mvp
+git add app.js
+git commit -m "Fix expenses route syntax and redirect loop"
+git push
+Render should redeploy from that push if auto-deploy is still enabled.
+
+One small note
+Your homepage stats.properties is currently counting rows in property_values, not distinct properties from transactions. That will not crash anything, but it may make the number a little misleading.
+
+Paste the next Render error or success screen after deploy.
+
+
+

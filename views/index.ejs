@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Financial Workbook Importer</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2rem;
+      color: #1f2937;
+      background: #ffffff;
+    }
+    h1, h2 {
+      margin-bottom: 0.5rem;
+    }
+    p {
+      color: #4b5563;
+      max-width: 800px;
+    }
+    .top-actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin: 1rem 0 2rem;
+    }
+    .btn, button {
+      display: inline-block;
+      padding: 0.8rem 1rem;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      background: #111827;
+      color: #fff;
+      text-decoration: none;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    .btn.secondary {
+      background: #fff;
+      color: #111827;
+    }
+    .upload-card, .stats-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+      max-width: 760px;
+    }
+    input[type="file"] {
+      display: block;
+      margin: 0.75rem 0 1rem;
+      width: 100%;
+      max-width: 500px;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .stat {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 1rem;
+      background: #f9fafb;
+    }
+    .stat strong {
+      display: block;
+      font-size: 1.5rem;
+      margin-bottom: 0.25rem;
+      color: #111827;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+    }
+    th, td {
+      border: 1px solid #e5e7eb;
+      padding: 0.75rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f3f4f6;
+    }
+    a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+    .muted {
+      color: #6b7280;
+    }
+  </style>
+</head>
+<body>
+  <h1>Financial workbook importer</h1>
+  <p>
+    Upload your Excel workbook, review imported account snapshots, transactions,
+    portfolio properties, and flagged import issues.
+  </p>
+
+  <div class="top-actions">
+    <a class="btn secondary" href="/expenses/new">Add expense</a>
+    <a class="btn secondary" href="/sales/new">Record sale</a>
+  </div>
+
+  <div class="upload-card">
+    <h2>Upload workbook</h2>
+
+    <% if (latestImport) { %>
+      <p class="muted">
+        Latest import: <strong><%= latestImport.filename %></strong> ·
+        <%= latestImport.imported_at %>
+      </p>
+    <% } %>
+
+    <form method="POST" action="/import" enctype="multipart/form-data">
+      <label for="financialFile"><strong>Select Excel workbook</strong></label>
+      <input
+        id="financialFile"
+        name="financialFile"
+        type="file"
+        accept=".xlsx,.xls,.xlsm"
+        required
+      />
+      <button type="submit">Upload workbook</button>
+    </form>
+  </div>
+
+  <% if (stats) { %>
+    <div class="stats-card">
+      <h2>Latest import stats</h2>
+      <div class="stats-grid">
+        <div class="stat">
+          <strong><%= stats.accounts %></strong>
+          <span>Accounts</span>
+        </div>
+        <div class="stat">
+          <strong><%= stats.transactions %></strong>
+          <span>Transactions</span>
+        </div>
+        <div class="stat">
+          <strong><%= stats.properties %></strong>
+          <span>Properties</span>
+        </div>
+        <div class="stat">
+          <strong><%= stats.issues %></strong>
+          <span>Issues</span>
+        </div>
+      </div>
+    </div>
+  <% } %>
+
+  <h2>Recent imports</h2>
+
+  <% if (recentImports && recentImports.length) { %>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Filename</th>
+          <th>Imported</th>
+          <th>Rows</th>
+          <th>Open</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% recentImports.forEach(function(item) { %>
+          <tr>
+            <td><%= item.id %></td>
+            <td><%= item.filename %></td>
+            <td><%= item.imported_at %></td>
+            <td><%= item.row_count %></td>
+            <td><a href="/imports/<%= item.id %>">View</a></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } else { %>
+    <p class="muted">No imports yet.</p>
+  <% } %>
+</body>
+</html>
