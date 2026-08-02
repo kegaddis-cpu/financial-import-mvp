@@ -133,19 +133,19 @@
 
   <div class="summary-grid">
     <div class="card">
-      <strong><%= accounts.length %></strong>
+      <strong><%= accounts ? accounts.length : 0 %></strong>
       <span>Account snapshots</span>
     </div>
     <div class="card">
-      <strong><%= properties.length %></strong>
+      <strong><%= properties ? properties.length : 0 %></strong>
       <span>Properties with transactions</span>
     </div>
     <div class="card">
-      <strong><%= propertyValues.length %></strong>
+      <strong><%= propertyValues ? propertyValues.length : 0 %></strong>
       <span>Property values</span>
     </div>
     <div class="card">
-      <strong><%= issues.length %></strong>
+      <strong><%= issues ? issues.length : 0 %></strong>
       <span>Visible issues</span>
     </div>
   </div>
@@ -189,4 +189,105 @@
             <% }) %>
           </tbody>
         </table>
-      
+      </div>
+    <% } else { %>
+      <p class="ok-empty">No property rollup available.</p>
+    <% } %>
+  </div>
+
+  <div class="panel">
+    <h2>Account snapshots</h2>
+
+    <% if (accounts && accounts.length) { %>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th class="num">Balance</th>
+              <th>As of</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% accounts.forEach(function(row) { %>
+              <tr>
+                <td><%= row.account_name || row.name || '' %></td>
+                <td class="num">
+                  <%= row.balance == null
+                    ? ''
+                    : Number(row.balance).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                </td>
+                <td><%= row.as_of || row.snapshot_date || '' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p class="ok-empty">No account snapshots available.</p>
+    <% } %>
+  </div>
+
+  <div class="panel">
+    <h2>Property values</h2>
+
+    <% if (propertyValues && propertyValues.length) { %>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Property</th>
+              <th class="num">Value</th>
+              <th>As of</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% propertyValues.forEach(function(row) { %>
+              <tr>
+                <td><%= row.property_name || '' %></td>
+                <td class="num">
+                  <%= row.property_value == null && row.value == null
+                    ? ''
+                    : Number(row.property_value ?? row.value).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                </td>
+                <td><%= row.as_of || row.valuation_date || '' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p class="ok-empty">No property values available.</p>
+    <% } %>
+  </div>
+
+  <div class="panel">
+    <h2>Issues</h2>
+
+    <% if (issues && issues.length) { %>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Message</th>
+              <th>Row</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% issues.forEach(function(row) { %>
+              <tr>
+                <td><span class="issue-badge"><%= row.issue_type || row.type || 'Issue' %></span></td>
+                <td><%= row.message || row.issue_message || '' %></td>
+                <td><%= row.row_number ?? row.source_row ?? '' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p class="ok-empty">No issues detected.</p>
+    <% } %>
+  </div>
+</body>
+</html>
