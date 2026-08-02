@@ -82,7 +82,7 @@
     <div class="card">
       <h2>Latest import</h2>
 
-      <% if (latestImport) { %>
+      <% if (typeof latestImport !== 'undefined' && latestImport) { %>
         <p><strong>File:</strong> <%= latestImport.filename %></p>
         <p><strong>Imported at:</strong> <%= latestImport.imported_at %></p>
         <% if (latestImport.row_count !== undefined) { %>
@@ -96,7 +96,7 @@
     <div class="card">
       <h2>Recent imports</h2>
 
-      <% if (recentImports && recentImports.length) { %>
+      <% if (typeof recentImports !== 'undefined' && recentImports && recentImports.length) { %>
         <table>
           <thead>
             <tr>
