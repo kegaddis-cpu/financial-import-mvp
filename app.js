@@ -252,13 +252,10 @@ function importWorkbook(filePath, originalName) {
   `);
 
     let rowCount = 0;
-
     const ignoredSheets = new Set(['Cleanup Notes']);
 
     for (const sheetName of workbook.SheetNames) {
-        if (ignoredSheets.has(sheetName)) {
-            continue;
-        }
+        if (ignoredSheets.has(sheetName)) continue;
 
         const ws = workbook.Sheets[sheetName];
         const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
@@ -266,12 +263,10 @@ function importWorkbook(filePath, originalName) {
         if (/^Accounts$/i.test(sheetName)) {
             for (let i = 0; i < rows.length; i++) {
                 const r = rows[i];
-
                 const rawBalance = r['Balance'] ?? r['Balance '] ?? r['BALANCE'] ?? null;
 
                 if (!r['DATE'] && !r['Bank'] && rawBalance == null) continue;
                 if (!r['Bank'] || r['Bank'] === 'Bank') continue;
-
                 if (!r['Acct type'] && !r['ACCT NUM'] && !r['ROUTING'] && !r['Bank']) continue;
 
                 const balance = n(rawBalance);
@@ -399,6 +394,70 @@ function importWorkbook(filePath, originalName) {
 
 app.get('/', (req, res) => {
     const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
+    const hasData = db.prepare('SELECT COUNT(*) AS c FROM transactions').get().c > 0;
+
+    if (!hasData) {
+        return res.redirect('/setup');
+    }
+
+    const stats = {
+        accounts: db.prepare('SELECT COUNT(*) AS c FROM account_snapshots').get().c,
+        transactions: db.prepare('SELECT COUNT(*) AS c FROM transactions').get().c,
+        properties: db.prepare(`
+            SELECT COUNT(DISTINCT property_name) AS c
+            FROM transactions
+            WHERE property_name IS NOT NULL AND TRIM(property_name) <> ''
+        `).get().c,
+        issues: latestImport
+            ? db.prepare('SELECT COUNT(*) AS c FROM import_issues WHERE import_id = ?').get(latestImport.id).c
+            : 0
+    };
+
+    const recentTransactions = db.prepare(`
+        SELECT txn_date, property_name, reason, amount, source_category
+        FROM transactions
+        ORDER BY COALESCE(txn_date, '0000-00-00') DESC, id DESC
+        LIMIT 20
+    `).all();
+
+    const monthlyCashFlow = db.prepare(`
+        SELECT
+          property_name,
+          ROUND(SUM(COALESCE(income_amount, CASE WHEN amount > 0 THEN amount ELSE 0 END)), 2) AS income_total,
+          ROUND(ABS(SUM(COALESCE(expense_amount, CASE WHEN amount < 0 THEN amount ELSE 0 END))), 2) AS expense_total,
+          ROUND(SUM(amount), 2) AS net_total
+        FROM transactions
+        WHERE property_name IS NOT NULL
+          AND substr(txn_date, 1, 7) = strftime('%Y-%m', 'now')
+        GROUP BY property_name
+        ORDER BY property_name
+    `).all();
+
+    const latestPropertyValues = db.prepare(`
+        SELECT address, estimate, profit_loss, snapshot_date
+        FROM property_values
+        ORDER BY COALESCE(snapshot_date, '') DESC, address
+        LIMIT 20
+    `).all();
+
+    res.render('index', {
+        latestImport,
+        stats,
+        recentTransactions,
+        monthlyCashFlow,
+        latestPropertyValues
+    });
+});
+
+app.get('/setup', (req, res) => {
+    const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
+    const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 10').all();
+
+    res.render('setup', { latestImport, recentImports });
+});
+
+app.get('/data/imports', (req, res) => {
+    const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
 
     const stats = latestImport
         ? {
@@ -410,8 +469,8 @@ app.get('/', (req, res) => {
         }
         : null;
 
-    const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 10').all();
-    res.render('index', { latestImport, stats, recentImports });
+    const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 25').all();
+    res.render('imports', { latestImport, stats, recentImports });
 });
 
 app.post('/import', upload.single('financialFile'), (req, res) => {
@@ -633,88 +692,4 @@ app.get('/reports/cash-flow', (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`Financial importer running on http://localhost:${PORT}`);
-}
-app.get('/', (req, res) => {
-    const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
-    const hasData = db.prepare('SELECT COUNT(*) AS c FROM transactions').get().c > 0;
-
-    if (!hasData) {
-        return res.redirect('/setup');
-    }
-
-    const stats = {
-        accounts: db.prepare('SELECT COUNT(*) AS c FROM account_snapshots').get().c,
-        transactions: db.prepare('SELECT COUNT(*) AS c FROM transactions').get().c,
-        properties: db.prepare(`
-            SELECT COUNT(DISTINCT property_name) AS c
-            FROM transactions
-            WHERE property_name IS NOT NULL AND TRIM(property_name) <> ''
-        `).get().c,
-        issues: latestImport
-            ? db.prepare('SELECT COUNT(*) AS c FROM import_issues WHERE import_id = ?').get(latestImport.id).c
-            : 0
-    };
-
-    const recentTransactions = db.prepare(`
-        SELECT txn_date, property_name, reason, amount, source_category
-        FROM transactions
-        ORDER BY COALESCE(txn_date, '0000-00-00') DESC, id DESC
-        LIMIT 20
-    `).all();
-
-    const monthlyCashFlow = db.prepare(`
-        SELECT
-          property_name,
-          ROUND(SUM(COALESCE(income_amount, CASE WHEN amount > 0 THEN amount ELSE 0 END)), 2) AS income_total,
-          ROUND(ABS(SUM(COALESCE(expense_amount, CASE WHEN amount < 0 THEN amount ELSE 0 END))), 2) AS expense_total,
-          ROUND(SUM(amount), 2) AS net_total
-        FROM transactions
-        WHERE property_name IS NOT NULL
-          AND substr(txn_date, 1, 7) = strftime('%Y-%m', 'now')
-        GROUP BY property_name
-        ORDER BY property_name
-    `).all();
-
-    const latestPropertyValues = db.prepare(`
-        SELECT address, estimate, profit_loss, snapshot_date
-        FROM property_values
-        ORDER BY COALESCE(snapshot_date, '') DESC, address
-        LIMIT 20
-    `).all();
-
-    res.render('index', {
-        latestImport,
-        stats,
-        recentTransactions,
-        monthlyCashFlow,
-        latestPropertyValues
-    });
 });
-
-app.get('/setup', (req, res) => {
-    const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
-    const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 10').all();
-
-    res.render('setup', { latestImport, recentImports });
-});
-
-app.get('/data/imports', (req, res) => {
-    const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
-    const stats = latestImport
-        ? {
-            accounts: db.prepare('SELECT COUNT(*) AS c FROM account_snapshots WHERE import_id = ?').get(latestImport.id).c,
-            transactions: db.prepare('SELECT COUNT(*) AS c FROM transactions WHERE import_id = ?').get(latestImport.id).c,
-            properties: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
-            values: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
-            issues: db.prepare('SELECT COUNT(*) AS c FROM import_issues WHERE import_id = ?').get(latestImport.id).c
-        }
-        : null;
-
-    const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 25').all();
-    res.render('imports', { latestImport, stats, recentImports });
-});          
-          
-          
-          
-          
-          );
