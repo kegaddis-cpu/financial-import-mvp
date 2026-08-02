@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Financial Workbook Importer</title>
+  <title>Financial Dashboard</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -11,19 +11,23 @@
       color: #1f2937;
       background: #ffffff;
     }
+
     h1, h2 {
       margin-bottom: 0.5rem;
     }
+
     p {
       color: #4b5563;
-      max-width: 800px;
+      max-width: 900px;
     }
+
     .top-actions {
       display: flex;
       gap: 0.75rem;
       flex-wrap: wrap;
       margin: 1rem 0 2rem;
     }
+
     .btn, button {
       display: inline-block;
       padding: 0.8rem 1rem;
@@ -35,150 +39,238 @@
       cursor: pointer;
       font-size: 0.95rem;
     }
+
     .btn.secondary {
       background: #fff;
       color: #111827;
     }
-    .upload-card, .stats-card {
+
+    .panel {
       border: 1px solid #e5e7eb;
       border-radius: 10px;
       padding: 1rem;
       margin-bottom: 1.5rem;
-      max-width: 760px;
+      max-width: 1100px;
     }
-    input[type="file"] {
-      display: block;
-      margin: 0.75rem 0 1rem;
-      width: 100%;
-      max-width: 500px;
-    }
+
     .stats-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
       gap: 1rem;
       margin-top: 1rem;
     }
+
     .stat {
       border: 1px solid #e5e7eb;
       border-radius: 8px;
       padding: 1rem;
       background: #f9fafb;
     }
+
     .stat strong {
       display: block;
       font-size: 1.5rem;
       margin-bottom: 0.25rem;
       color: #111827;
     }
+
+    .table-wrap {
+      overflow-x: auto;
+      margin-top: 1rem;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
-      margin-top: 1rem;
+      margin-top: 0.5rem;
     }
+
     th, td {
       border: 1px solid #e5e7eb;
       padding: 0.75rem;
       text-align: left;
       vertical-align: top;
+      white-space: nowrap;
     }
+
     th {
       background: #f3f4f6;
     }
+
     a {
       color: #2563eb;
       text-decoration: none;
     }
+
     .muted {
       color: #6b7280;
+    }
+
+    .amount-negative {
+      color: #b91c1c;
+      font-weight: 600;
+    }
+
+    .amount-positive {
+      color: #047857;
+      font-weight: 600;
     }
   </style>
 </head>
 <body>
-  <h1>Financial workbook importer</h1>
+  <h1>Financial dashboard</h1>
   <p>
-    Upload your Excel workbook, review imported account snapshots, transactions,
-    portfolio properties, and flagged import issues.
+    The app is now the working record keeper. Use this page to review monthly cash flow,
+    recent activity, and property values. Import is now a setup and maintenance function.
   </p>
 
   <div class="top-actions">
-    <a class="btn secondary" href="/expenses/new">Add expense</a>
-    <a class="btn secondary" href="/sales/new">Record sale</a>
+    <a class="btn" href="/expenses/new">Add expense</a>
+    <a class="btn" href="/sales/new">Record sale</a>
+    <a class="btn secondary" href="/reports/cash-flow">Cash flow report</a>
+    <a class="btn secondary" href="/data/imports">Imports</a>
+    <a class="btn secondary" href="/setup">Setup</a>
   </div>
 
-  <div class="upload-card">
-    <h2>Upload workbook</h2>
+  <% if (latestImport) { %>
+    <p class="muted">
+      Latest import: <strong><%= latestImport.filename %></strong> ·
+      <%= latestImport.imported_at %>
+    </p>
+  <% } %>
 
-    <% if (latestImport) { %>
-      <p class="muted">
-        Latest import: <strong><%= latestImport.filename %></strong> ·
-        <%= latestImport.imported_at %>
-      </p>
-    <% } %>
+  <div class="panel">
+    <h2>Overview</h2>
 
-    <form method="POST" action="/import" enctype="multipart/form-data">
-      <label for="financialFile"><strong>Select Excel workbook</strong></label>
-      <input
-        id="financialFile"
-        name="financialFile"
-        type="file"
-        accept=".xlsx,.xls,.xlsm"
-        required
-      />
-      <button type="submit">Upload workbook</button>
-    </form>
-  </div>
-
-  <% if (stats) { %>
-    <div class="stats-card">
-      <h2>Latest import stats</h2>
-      <div class="stats-grid">
-        <div class="stat">
-          <strong><%= stats.accounts %></strong>
-          <span>Accounts</span>
-        </div>
-        <div class="stat">
-          <strong><%= stats.transactions %></strong>
-          <span>Transactions</span>
-        </div>
-        <div class="stat">
-          <strong><%= stats.properties %></strong>
-          <span>Properties</span>
-        </div>
-        <div class="stat">
-          <strong><%= stats.issues %></strong>
-          <span>Issues</span>
-        </div>
+    <div class="stats-grid">
+      <div class="stat">
+        <strong><%= stats ? stats.accounts : 0 %></strong>
+        <span>Accounts</span>
+      </div>
+      <div class="stat">
+        <strong><%= stats ? stats.transactions : 0 %></strong>
+        <span>Transactions</span>
+      </div>
+      <div class="stat">
+        <strong><%= stats ? stats.properties : 0 %></strong>
+        <span>Properties</span>
+      </div>
+      <div class="stat">
+        <strong><%= stats ? stats.issues : 0 %></strong>
+        <span>Latest import issues</span>
       </div>
     </div>
-  <% } %>
+  </div>
 
-  <h2>Recent imports</h2>
+  <div class="panel">
+    <h2>This month by property</h2>
 
-  <% if (recentImports && recentImports.length) { %>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Filename</th>
-          <th>Imported</th>
-          <th>Rows</th>
-          <th>Open</th>
-        </tr>
-      </thead>
-      <tbody>
-        <% recentImports.forEach(function(item) { %>
-          <tr>
-            <td><%= item.id %></td>
-            <td><%= item.filename %></td>
-            <td><%= item.imported_at %></td>
-            <td><%= item.row_count %></td>
-            <td><a href="/imports/<%= item.id %>">View</a></td>
-          </tr>
-        <% }) %>
-      </tbody>
-    </table>
-  <% } else { %>
-    <p class="muted">No imports yet.</p>
-  <% } %>
+    <% if (monthlyCashFlow && monthlyCashFlow.length) { %>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Property</th>
+              <th>Income</th>
+              <th>Expenses</th>
+              <th>Net</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% monthlyCashFlow.forEach(function(row) { %>
+              <tr>
+                <td><%= row.property_name || '—' %></td>
+                <td class="amount-positive">
+                  <%= Number(row.income_total || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                </td>
+                <td class="amount-negative">
+                  <%= Number(row.expense_total || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                </td>
+                <td class="<%= Number(row.net_total || 0) < 0 ? 'amount-negative' : 'amount-positive' %>">
+                  <%= Number(row.net_total || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p class="muted">No transactions found for the current month.</p>
+    <% } %>
+  </div>
+
+  <div class="panel">
+    <h2>Recent transactions</h2>
+
+    <% if (recentTransactions && recentTransactions.length) { %>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Property</th>
+              <th>Reason</th>
+              <th>Category</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% recentTransactions.forEach(function(row) { %>
+              <tr>
+                <td><%= row.txn_date || '' %></td>
+                <td><%= row.property_name || '—' %></td>
+                <td><%= row.reason || '' %></td>
+                <td><%= row.source_category || '' %></td>
+                <td class="<%= Number(row.amount || 0) < 0 ? 'amount-negative' : 'amount-positive' %>">
+                  <%= Number(row.amount || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p class="muted">No transactions recorded yet.</p>
+    <% } %>
+  </div>
+
+  <div class="panel">
+    <h2>Latest property values</h2>
+
+    <% if (latestPropertyValues && latestPropertyValues.length) { %>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Address</th>
+              <th>Estimate</th>
+              <th>Profit/Loss</th>
+              <th>Snapshot date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% latestPropertyValues.forEach(function(row) { %>
+              <tr>
+                <td><%= row.address || '' %></td>
+                <td>
+                  <%= row.estimate == null
+                    ? '—'
+                    : Number(row.estimate).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                </td>
+                <td class="<%= Number(row.profit_loss || 0) < 0 ? 'amount-negative' : 'amount-positive' %>">
+                  <%= row.profit_loss == null
+                    ? '—'
+                    : Number(row.profit_loss).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                </td>
+                <td><%= row.snapshot_date || '' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p class="muted">No property values loaded yet.</p>
+    <% } %>
+  </div>
 </body>
 </html>
