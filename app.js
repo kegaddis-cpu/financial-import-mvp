@@ -480,6 +480,36 @@ app.post('/import', upload.single('financialFile'), (req, res) => {
     res.redirect(`/imports/${importId}`);
 });
 
+app.post('/imports/rollback-last', (req, res) => {
+    try {
+        const lastImport = db.prepare(`
+            SELECT id, filename, imported_at, row_count
+            FROM imports
+            ORDER BY id DESC
+            LIMIT 1
+        `).get();
+
+        if (!lastImport) {
+            return res.status(404).send('No imports found to roll back.');
+        }
+
+        const rollbackLastImport = db.transaction((importId) => {
+            db.prepare(`DELETE FROM import_issues WHERE import_id = ?`).run(importId);
+            db.prepare(`DELETE FROM transactions WHERE import_id = ?`).run(importId);
+            db.prepare(`DELETE FROM property_values WHERE import_id = ?`).run(importId);
+            db.prepare(`DELETE FROM account_snapshots WHERE import_id = ?`).run(importId);
+            db.prepare(`DELETE FROM imports WHERE id = ?`).run(importId);
+        });
+
+        rollbackLastImport(lastImport.id);
+
+        res.redirect('/setup');
+    } catch (err) {
+        console.error('Rollback failed:', err);
+        res.status(500).send('Failed to roll back last import.');
+    }
+});
+
 app.get('/expenses/new', (req, res) => {
     const latestImportId = getLatestImportId();
 
