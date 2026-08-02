@@ -1,11 +1,125 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Setup</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 960px;
+        margin: 40px auto;
+        padding: 0 16px;
+        color: #222;
+      }
+      h1, h2 {
+        margin-bottom: 8px;
+      }
+      p {
+        line-height: 1.5;
+      }
+      .card {
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 20px 0;
+      }
+      .actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 16px;
+      }
+      .btn {
+        display: inline-block;
+        padding: 10px 14px;
+        border-radius: 8px;
+        text-decoration: none;
+        border: 1px solid #ccc;
+        background: #f7f7f7;
+        color: #111;
+      }
+      .btn-primary {
+        background: #111;
+        color: #fff;
+        border-color: #111;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+      th, td {
+        border: 1px solid #ddd;
+        padding: 10px;
+        text-align: left;
+      }
+      th {
+        background: #f3f3f3;
+      }
+      .muted {
+        color: #666;
+      }
+    </style>
   </head>
   <body>
-    <h1>Setup page</h1>
-    <p>If you can see this, setup.ejs is working.</p>
+    <h1>Financial workbook setup</h1>
+    <p>Use this page to upload your workbook and review recent imports.</p>
+
+    <div class="card">
+      <h2>Upload workbook</h2>
+      <p class="muted">Choose your Excel workbook to seed or refresh your financial data.</p>
+
+      <form action="/import" method="POST" enctype="multipart/form-data">
+        <input type="file" name="financialFile" accept=".xlsx,.xls,.xlsm" required />
+        <div class="actions">
+          <button class="btn btn-primary" type="submit">Upload workbook</button>
+          <a class="btn" href="/data/imports">View import history</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Latest import</h2>
+
+      <% if (latestImport) { %>
+        <p><strong>File:</strong> <%= latestImport.filename %></p>
+        <p><strong>Imported at:</strong> <%= latestImport.imported_at %></p>
+        <% if (latestImport.row_count !== undefined) { %>
+          <p><strong>Rows:</strong> <%= latestImport.row_count %></p>
+        <% } %>
+      <% } else { %>
+        <p class="muted">No imports yet.</p>
+      <% } %>
+    </div>
+
+    <div class="card">
+      <h2>Recent imports</h2>
+
+      <% if (recentImports && recentImports.length) { %>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Filename</th>
+              <th>Imported at</th>
+              <th>Rows</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% recentImports.forEach(function(item) { %>
+              <tr>
+                <td><%= item.id %></td>
+                <td><%= item.filename %></td>
+                <td><%= item.imported_at %></td>
+                <td><%= item.row_count ?? '' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      <% } else { %>
+        <p class="muted">No recent imports to display.</p>
+      <% } %>
+    </div>
   </body>
 </html>
