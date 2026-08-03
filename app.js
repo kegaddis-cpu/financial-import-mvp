@@ -147,23 +147,31 @@ function getRecentImports(limit = 10) {
   `).all(limit);
 }
 
-app.get('/', (req, res) => {
-    res.render('index', {
-        latestImport: getLatestImport(),
-        recentImports: getRecentImports(10),
-        stats: getStats()
-    });
+app.get('/', (req, res, next) => {
+    try {
+        res.render('index', {
+            latestImport: getLatestImport(),
+            recentImports: getRecentImports(10),
+            stats: getStats()
+        });
+    } catch (err) {
+        next(err);
+    }
 });
 
-app.get('/setup', (req, res) => {
-    res.render('setup', {
-        latestImport: getLatestImport(),
-        recentImports: getRecentImports(10),
-        stats: getStats()
-    });
+app.get('/setup', (req, res, next) => {
+    try {
+        res.render('setup', {
+            latestImport: getLatestImport(),
+            recentImports: getRecentImports(10),
+            stats: getStats()
+        });
+    } catch (err) {
+        next(err);
+    }
 });
 
-app.post('/setup/import', upload.single('workbook'), (req, res) => {
+app.post('/setup/import', upload.single('workbook'), (req, res, next) => {
     if (!req.file) {
         return res.status(400).send('No file uploaded.');
     }
@@ -277,131 +285,134 @@ app.post('/setup/import', upload.single('workbook'), (req, res) => {
 
         return res.redirect(`/imports/${importId}`);
     } catch (err) {
-        console.error(err);
-
         try {
             fs.unlinkSync(req.file.path);
         } catch (_) { }
-
-        return res.status(500).send('Import failed.');
+        next(err);
     }
 });
 
-app.get('/data/imports', (req, res) => {
-    res.render('imports', {
-        latestImport: getLatestImport(),
-        recentImports: getRecentImports(25),
-        stats: getStats()
-    });
-});
-
-app.get('/imports/:id', (req, res) => {
-    const importId = Number(req.params.id);
-
-    if (!Number.isInteger(importId) || importId <= 0) {
-        return res.status(400).send('Invalid import ID.');
-    }
-
-    const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(importId);
-
-    if (!imp) {
-        return res.status(404).send('Import not found.');
-    }
-
-    const accounts = db.prepare(`
-    SELECT *
-    FROM account_snapshots
-    WHERE import_id = ?
-    ORDER BY account_name, as_of
-  `).all(importId);
-
-    const properties = db.prepare(`
-    SELECT
-      property_name,
-      COUNT(*) AS txn_count,
-      SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS income_total,
-      SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) AS expense_total,
-      SUM(amount) AS net_total
-    FROM transactions
-    WHERE import_id = ?
-    GROUP BY property_name
-    ORDER BY property_name
-  `).all(importId);
-
-    const propertyValues = db.prepare(`
-    SELECT *
-    FROM property_values
-    WHERE import_id = ?
-    ORDER BY property_name, as_of
-  `).all(importId);
-
-    const issues = db.prepare(`
-    SELECT *
-    FROM import_issues
-    WHERE import_id = ?
-    ORDER BY row_number, id
-  `).all(importId);
-
-    res.render('import-detail', {
-        imp,
-        accounts,
-        properties,
-        propertyValues,
-        issues
-    });
-});
-
-app.post('/imports/rollback-last', (req, res) => {
-    const latest = db.prepare('SELECT id FROM imports ORDER BY id DESC LIMIT 1').get();
-
-    if (!latest) {
-        return res.status(404).send('No imports found to roll back.');
-    }
-
-    const rollbackImport = db.transaction((id) => {
-        db.prepare('DELETE FROM import_issues WHERE import_id = ?').run(id);
-        db.prepare('DELETE FROM transactions WHERE import_id = ?').run(id);
-        db.prepare('DELETE FROM property_values WHERE import_id = ?').run(id);
-        db.prepare('DELETE FROM account_snapshots WHERE import_id = ?').run(id);
-        db.prepare('DELETE FROM imports WHERE id = ?').run(id);
-    });
-
+app.get('/data/imports', (req, res, next) => {
     try {
+        res.render('imports', {
+            latestImport: getLatestImport(),
+            recentImports: getRecentImports(25),
+            stats: getStats()
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.get('/imports/:id', (req, res, next) => {
+    try {
+        const importId = Number(req.params.id);
+
+        if (!Number.isInteger(importId) || importId <= 0) {
+            return res.status(400).send('Invalid import ID.');
+        }
+
+        const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(importId);
+
+        if (!imp) {
+            return res.status(404).send('Import not found.');
+        }
+
+        const accounts = db.prepare(`
+      SELECT *
+      FROM account_snapshots
+      WHERE import_id = ?
+      ORDER BY account_name, as_of
+    `).all(importId);
+
+        const properties = db.prepare(`
+      SELECT
+        property_name,
+        COUNT(*) AS txn_count,
+        SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS income_total,
+        SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) AS expense_total,
+        SUM(amount) AS net_total
+      FROM transactions
+      WHERE import_id = ?
+      GROUP BY property_name
+      ORDER BY property_name
+    `).all(importId);
+
+        const propertyValues = db.prepare(`
+      SELECT *
+      FROM property_values
+      WHERE import_id = ?
+      ORDER BY property_name, as_of
+    `).all(importId);
+
+        const issues = db.prepare(`
+      SELECT *
+      FROM import_issues
+      WHERE import_id = ?
+      ORDER BY row_number, id
+    `).all(importId);
+
+        res.render('import-detail', {
+            imp,
+            accounts,
+            properties,
+            propertyValues,
+            issues
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.post('/imports/rollback-last', (req, res, next) => {
+    try {
+        const latest = db.prepare('SELECT id FROM imports ORDER BY id DESC LIMIT 1').get();
+
+        if (!latest) {
+            return res.status(404).send('No imports found to roll back.');
+        }
+
+        const rollbackImport = db.transaction((id) => {
+            db.prepare('DELETE FROM import_issues WHERE import_id = ?').run(id);
+            db.prepare('DELETE FROM transactions WHERE import_id = ?').run(id);
+            db.prepare('DELETE FROM property_values WHERE import_id = ?').run(id);
+            db.prepare('DELETE FROM account_snapshots WHERE import_id = ?').run(id);
+            db.prepare('DELETE FROM imports WHERE id = ?').run(id);
+        });
+
         rollbackImport(latest.id);
         return res.redirect('/setup');
     } catch (err) {
-        console.error(err);
-        return res.status(500).send('Failed to roll back latest import.');
+        next(err);
     }
 });
 
-app.post('/imports/:id/rollback', (req, res) => {
-    const importId = Number(req.params.id);
-
-    if (!Number.isInteger(importId) || importId <= 0) {
-        return res.status(400).send('Invalid import ID.');
-    }
-
-    const imp = db.prepare('SELECT id FROM imports WHERE id = ?').get(importId);
-
-    if (!imp) {
-        return res.status(404).send('Import not found.');
-    }
-
-    const rollbackImport = db.transaction((id) => {
-        db.prepare('DELETE FROM import_issues WHERE import_id = ?').run(id);
-        db.prepare('DELETE FROM transactions WHERE import_id = ?').run(id);
-        db.prepare('DELETE FROM property_values WHERE import_id = ?').run(id);
-        db.prepare('DELETE FROM account_snapshots WHERE import_id = ?').run(id);
-        db.prepare('DELETE FROM imports WHERE id = ?').run(id);
-    });
-
+app.post('/imports/:id/rollback', (req, res, next) => {
     try {
+        const importId = Number(req.params.id);
+
+        if (!Number.isInteger(importId) || importId <= 0) {
+            return res.status(400).send('Invalid import ID.');
+        }
+
+        const imp = db.prepare('SELECT id FROM imports WHERE id = ?').get(importId);
+
+        if (!imp) {
+            return res.status(404).send('Import not found.');
+        }
+
+        const rollbackImport = db.transaction((id) => {
+            db.prepare('DELETE FROM import_issues WHERE import_id = ?').run(id);
+            db.prepare('DELETE FROM transactions WHERE import_id = ?').run(id);
+            db.prepare('DELETE FROM property_values WHERE import_id = ?').run(id);
+            db.prepare('DELETE FROM account_snapshots WHERE import_id = ?').run(id);
+            db.prepare('DELETE FROM imports WHERE id = ?').run(id);
+        });
+
         rollbackImport(importId);
         return res.redirect('/data/imports');
     } catch (err) {
-        console.error(err);
-        return res.status(500).send('Failed to roll back import.');
+        next(err);
     }
 });
 
@@ -411,6 +422,11 @@ app.get('/expenses/new', (req, res) => {
 
 app.get('/sales/new', (req, res) => {
     res.send('Record sale page placeholder');
+});
+
+app.use((err, req, res, next) => {
+    console.error('APP ERROR:', err);
+    res.status(500).send(`Internal Server Error: ${err.message}`);
 });
 
 app.listen(PORT, () => {
