@@ -147,6 +147,34 @@ function getRecentImports(limit = 10) {
   `).all(limit);
 }
 
+function getLatestImportStats() {
+    const latest = getLatestImport();
+
+    if (!latest) {
+        return {
+            accounts: 0,
+            transactions: 0,
+            properties: 0,
+            propertyValues: 0,
+            issues: 0
+        };
+    }
+
+    return {
+        accounts: db.prepare('SELECT COUNT(*) AS count FROM account_snapshots WHERE import_id = ?').get(latest.id).count,
+        transactions: db.prepare('SELECT COUNT(*) AS count FROM transactions WHERE import_id = ?').get(latest.id).count,
+        properties: db.prepare(`
+      SELECT COUNT(DISTINCT property_name) AS count
+      FROM transactions
+      WHERE import_id = ?
+        AND property_name IS NOT NULL
+        AND TRIM(property_name) <> ''
+    `).get(latest.id).count,
+        propertyValues: db.prepare('SELECT COUNT(*) AS count FROM property_values WHERE import_id = ?').get(latest.id).count,
+        issues: db.prepare('SELECT COUNT(*) AS count FROM import_issues WHERE import_id = ?').get(latest.id).count
+    };
+}
+
 function getMonthlyCashFlow() {
     try {
         return db.prepare(`
@@ -163,59 +191,48 @@ function getMonthlyCashFlow() {
     }
 }
 
-function getLatestImportStats() {
-    const latest = getLatestImport();
-
-    if (!latest) {
-        return {
-            accounts: 0,
-            transactions: 0,
-            properties: 0,
-            propertyValues: 0,
-            issues: 0
-        };
-    }
-
-    const accounts = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM account_snapshots
-    WHERE import_id = ?
-  `).get(latest.id).count;
-
-    const transactions = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM transactions
-    WHERE import_id = ?
-  `).get(latest.id).count;
-
-    const properties = db.prepare(`
-    SELECT COUNT(DISTINCT property_name) AS count
-    FROM transactions
-    WHERE import_id = ?
-      AND property_name IS NOT NULL
-      AND TRIM(property_name) <> ''
-  `).get(latest.id).count;
-
-    const propertyValues = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM property_values
-    WHERE import_id = ?
-  `).get(latest.id).count;
-
-    const issues = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM import_issues
-    WHERE import_id = ?
-  `).get(latest.id).count;
-
-    return {
-        accounts,
-        transactions,
-        properties,
-        propertyValues,
-        issues
+app.use((req, res, next) => {
+    res.locals.latestImport = null;
+    res.locals.recentImports = [];
+    res.locals.stats = {
+        importCount: 0,
+        transactionCount: 0,
+        accountCount: 0,
+        propertyValueCount: 0,
+        issueCount: 0
     };
-}
+    res.locals.latestImportStats = {
+        accounts: 0,
+        transactions: 0,
+        properties: 0,
+        propertyValues: 0,
+        issues: 0
+    };
+    res.locals.monthlyCashFlow = [];
+    res.locals.accounts = [];
+    res.locals.properties = [];
+    res.locals.propertyValues = [];
+    res.locals.issues = [];
+    res.locals.accountSnapshots = [];
+    res.locals.propertyRollup = [];
+    res.locals.importIssues = [];
+    res.locals.latestIssues = [];
+    res.locals.latestProperties = [];
+    res.locals.portfolioProperties = [];
+    res.locals.recentTransactions = [];
+    res.locals.transactions = [];
+    res.locals.propertiesWithTransactions = [];
+    res.locals.propertyCards = [];
+    res.locals.dashboardCards = [];
+    res.locals.importSummary = {};
+    res.locals.summary = {};
+    res.locals.alerts = [];
+    res.locals.warnings = [];
+    res.locals.errors = [];
+    res.locals.sales = [];
+    res.locals.expenses = [];
+    next();
+});
 
 app.get('/', (req, res) => {
     try {
@@ -224,11 +241,7 @@ app.get('/', (req, res) => {
             recentImports: getRecentImports(10),
             stats: getStats(),
             latestImportStats: getLatestImportStats(),
-            monthlyCashFlow: getMonthlyCashFlow(),
-            accounts: [],
-            properties: [],
-            propertyValues: [],
-            issues: []
+            monthlyCashFlow: getMonthlyCashFlow()
         });
     } catch (err) {
         console.error('GET / failed:', err);
@@ -324,16 +337,7 @@ app.post('/setup/import', upload.single('workbook'), (req, res) => {
                     }
 
                     if (propertyName && amount !== null) {
-                        insertTxn.run(
-                            importId,
-                            propertyName,
-                            txnDate,
-                            description,
-                            category,
-                            amount,
-                            direction,
-                            index + 2
-                        );
+                        insertTxn.run(importId, propertyName, txnDate, description, category, amount, direction, index + 2);
                     }
 
                     if (propertyName && propertyValue !== null) {
@@ -444,30 +448,6 @@ app.get('/imports/:id', (req, res) => {
     } catch (err) {
         console.error('GET /imports/:id failed:', err);
         res.status(500).send(`Internal Server Error: ${err.message}`);
-    }
-});
-
-app.post('/imports/rollback-last', (req, res) => {
-    try {
-        const latest = db.prepare('SELECT id FROM imports ORDER BY id DESC LIMIT 1').get();
-
-        if (!latest) {
-            return res.status(404).send('No imports found to roll back.');
-        }
-
-        const rollbackImport = db.transaction((id) => {
-            db.prepare('DELETE FROM import_issues WHERE import_id = ?').run(id);
-            db.prepare('DELETE FROM transactions WHERE import_id = ?').run(id);
-            db.prepare('DELETE FROM property_values WHERE import_id = ?').run(id);
-            db.prepare('DELETE FROM account_snapshots WHERE import_id = ?').run(id);
-            db.prepare('DELETE FROM imports WHERE id = ?').run(id);
-        });
-
-        rollbackImport(latest.id);
-        return res.redirect('/setup');
-    } catch (err) {
-        console.error('POST /imports/rollback-last failed:', err);
-        return res.status(500).send(`Rollback failed: ${err.message}`);
     }
 });
 
