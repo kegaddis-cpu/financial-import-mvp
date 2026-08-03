@@ -147,19 +147,96 @@ function getRecentImports(limit = 10) {
   `).all(limit);
 }
 
-app.get('/', (req, res, next) => {
+function getMonthlyCashFlow() {
+    try {
+        return db.prepare(`
+      SELECT
+        COALESCE(property_name, 'Unassigned') AS property_name,
+        SUM(amount) AS net_amount
+      FROM transactions
+      GROUP BY COALESCE(property_name, 'Unassigned')
+      ORDER BY property_name
+    `).all();
+    } catch (err) {
+        console.error('getMonthlyCashFlow failed:', err);
+        return [];
+    }
+}
+
+function getLatestImportStats() {
+    const latest = getLatestImport();
+
+    if (!latest) {
+        return {
+            accounts: 0,
+            transactions: 0,
+            properties: 0,
+            propertyValues: 0,
+            issues: 0
+        };
+    }
+
+    const accounts = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM account_snapshots
+    WHERE import_id = ?
+  `).get(latest.id).count;
+
+    const transactions = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM transactions
+    WHERE import_id = ?
+  `).get(latest.id).count;
+
+    const properties = db.prepare(`
+    SELECT COUNT(DISTINCT property_name) AS count
+    FROM transactions
+    WHERE import_id = ?
+      AND property_name IS NOT NULL
+      AND TRIM(property_name) <> ''
+  `).get(latest.id).count;
+
+    const propertyValues = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM property_values
+    WHERE import_id = ?
+  `).get(latest.id).count;
+
+    const issues = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM import_issues
+    WHERE import_id = ?
+  `).get(latest.id).count;
+
+    return {
+        accounts,
+        transactions,
+        properties,
+        propertyValues,
+        issues
+    };
+}
+
+app.get('/', (req, res) => {
     try {
         res.render('index', {
             latestImport: getLatestImport(),
             recentImports: getRecentImports(10),
-            stats: getStats()
+            stats: getStats(),
+            latestImportStats: getLatestImportStats(),
+            monthlyCashFlow: getMonthlyCashFlow(),
+            accounts: [],
+            properties: [],
+            propertyValues: [],
+            issues: []
         });
     } catch (err) {
-        next(err);
+        console.error('GET / failed:', err);
+        res.status(500).send(`Internal Server Error: ${err.message}`);
     }
 });
 
-app.get('/setup', (req, res, next) => {
+app.get('/setup', (req, res) => {
     try {
         res.render('setup', {
             latestImport: getLatestImport(),
@@ -167,11 +244,12 @@ app.get('/setup', (req, res, next) => {
             stats: getStats()
         });
     } catch (err) {
-        next(err);
+        console.error('GET /setup failed:', err);
+        res.status(500).send(`Internal Server Error: ${err.message}`);
     }
 });
 
-app.post('/setup/import', upload.single('workbook'), (req, res, next) => {
+app.post('/setup/import', upload.single('workbook'), (req, res) => {
     if (!req.file) {
         return res.status(400).send('No file uploaded.');
     }
@@ -285,14 +363,17 @@ app.post('/setup/import', upload.single('workbook'), (req, res, next) => {
 
         return res.redirect(`/imports/${importId}`);
     } catch (err) {
+        console.error('POST /setup/import failed:', err);
+
         try {
             fs.unlinkSync(req.file.path);
         } catch (_) { }
-        next(err);
+
+        return res.status(500).send(`Import failed: ${err.message}`);
     }
 });
 
-app.get('/data/imports', (req, res, next) => {
+app.get('/data/imports', (req, res) => {
     try {
         res.render('imports', {
             latestImport: getLatestImport(),
@@ -300,11 +381,12 @@ app.get('/data/imports', (req, res, next) => {
             stats: getStats()
         });
     } catch (err) {
-        next(err);
+        console.error('GET /data/imports failed:', err);
+        res.status(500).send(`Internal Server Error: ${err.message}`);
     }
 });
 
-app.get('/imports/:id', (req, res, next) => {
+app.get('/imports/:id', (req, res) => {
     try {
         const importId = Number(req.params.id);
 
@@ -360,11 +442,12 @@ app.get('/imports/:id', (req, res, next) => {
             issues
         });
     } catch (err) {
-        next(err);
+        console.error('GET /imports/:id failed:', err);
+        res.status(500).send(`Internal Server Error: ${err.message}`);
     }
 });
 
-app.post('/imports/rollback-last', (req, res, next) => {
+app.post('/imports/rollback-last', (req, res) => {
     try {
         const latest = db.prepare('SELECT id FROM imports ORDER BY id DESC LIMIT 1').get();
 
@@ -383,11 +466,12 @@ app.post('/imports/rollback-last', (req, res, next) => {
         rollbackImport(latest.id);
         return res.redirect('/setup');
     } catch (err) {
-        next(err);
+        console.error('POST /imports/rollback-last failed:', err);
+        return res.status(500).send(`Rollback failed: ${err.message}`);
     }
 });
 
-app.post('/imports/:id/rollback', (req, res, next) => {
+app.post('/imports/:id/rollback', (req, res) => {
     try {
         const importId = Number(req.params.id);
 
@@ -412,7 +496,8 @@ app.post('/imports/:id/rollback', (req, res, next) => {
         rollbackImport(importId);
         return res.redirect('/data/imports');
     } catch (err) {
-        next(err);
+        console.error('POST /imports/:id/rollback failed:', err);
+        return res.status(500).send(`Rollback failed: ${err.message}`);
     }
 });
 
@@ -424,9 +509,8 @@ app.get('/sales/new', (req, res) => {
     res.send('Record sale page placeholder');
 });
 
-app.use((err, req, res, next) => {
-    console.error('APP ERROR:', err);
-    res.status(500).send(`Internal Server Error: ${err.message}`);
+app.use((req, res) => {
+    res.status(404).send(`Cannot ${req.method} ${req.path}`);
 });
 
 app.listen(PORT, () => {
