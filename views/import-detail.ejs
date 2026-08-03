@@ -111,6 +111,21 @@
       color: #047857;
       font-weight: 600;
     }
+
+    .danger-btn {
+      appearance: none;
+      border: none;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      background: #b91c1c;
+      color: #ffffff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .danger-btn:hover {
+      background: #991b1b;
+    }
   </style>
 </head>
 <body>
@@ -129,6 +144,14 @@
       Imported: <%= imp.imported_at %><br />
       Parsed rows: <%= imp.row_count %>
     </p>
+  </div>
+
+  <div class="panel">
+    <h2>Actions</h2>
+    <p class="muted">Use rollback only if this entire import batch should be removed.</p>
+    <form method="post" action="/imports/<%= imp.id %>/rollback" onsubmit="return confirm('Roll back import #<%= imp.id %>? This will permanently delete all rows created by this import.');">
+      <button type="submit" class="danger-btn">Roll back this import</button>
+    </form>
   </div>
 
   <div class="summary-grid">

@@ -1,23 +1,29 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const Database = require('better-sqlite3');
 const multer = require('multer');
 const XLSX = require('xlsx');
-const Database = require('better-sqlite3');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
 const dataDir = path.join(__dirname, 'data');
 const uploadsDir = path.join(__dirname, 'uploads');
-
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(uploadsDir, { recursive: true });
 
 const db = new Database(path.join(dataDir, 'financials.db'));
-db.pragma('journal_mode = WAL');
 
-function initDb() {
-    db.exec(`
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+const upload = multer({ dest: uploadsDir });
+
+db.exec(`
 CREATE TABLE IF NOT EXISTS imports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   filename TEXT NOT NULL,
@@ -30,696 +36,334 @@ CREATE TABLE IF NOT EXISTS imports (
 CREATE TABLE IF NOT EXISTS account_snapshots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   import_id INTEGER NOT NULL,
-  snapshot_date TEXT,
-  bank TEXT,
-  account_type TEXT,
-  account_num TEXT,
-  routing TEXT,
+  account_name TEXT,
   balance REAL,
-  source_sheet TEXT,
+  as_of TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(import_id) REFERENCES imports(id)
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   import_id INTEGER NOT NULL,
-  txn_date TEXT,
   property_name TEXT,
+  txn_date TEXT,
+  description TEXT,
+  category TEXT,
   amount REAL,
-  reason TEXT,
-  income_amount REAL,
-  expense_amount REAL,
-  year_tag INTEGER,
-  source_sheet TEXT,
-  source_category TEXT,
+  direction TEXT,
+  source_row INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(import_id) REFERENCES imports(id)
 );
 
 CREATE TABLE IF NOT EXISTS property_values (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   import_id INTEGER NOT NULL,
-  address TEXT,
-  purchased REAL,
-  estimate REAL,
-  snapshot_date TEXT,
-  profit_loss REAL,
-  alt_estimate REAL,
-  alt_snapshot_date TEXT,
+  property_name TEXT,
+  property_value REAL,
+  as_of TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(import_id) REFERENCES imports(id)
 );
 
 CREATE TABLE IF NOT EXISTS import_issues (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   import_id INTEGER NOT NULL,
-  sheet_name TEXT,
   issue_type TEXT,
-  row_number INTEGER,
-  raw_payload TEXT,
   message TEXT,
+  row_number INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(import_id) REFERENCES imports(id)
 );
 `);
-}
-initDb();
 
-const storage = multer.diskStorage({
-    destination: (_, __, cb) => cb(null, uploadsDir),
-    filename: (_, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
-});
-const upload = multer({ storage });
-
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
-
-function excelDateToIso(value) {
+function toNumber(value) {
     if (value == null || value === '') return null;
-    if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
+    if (typeof value === 'number') return value;
+    const cleaned = String(value).replace(/[$,()]/g, '').trim();
+    if (!cleaned) return null;
+    const num = Number(cleaned);
+    return Number.isNaN(num) ? null : num;
+}
 
+function normalizeDate(value) {
+    if (!value) return null;
     if (typeof value === 'number') {
         const parsed = XLSX.SSF.parse_date_code(value);
         if (!parsed) return null;
-        const d = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
-        return d.toISOString().slice(0, 10);
+        return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
     }
-
-    const text = String(value).trim();
-    const d = new Date(text);
-    if (!isNaN(d)) return d.toISOString().slice(0, 10);
-    return text;
+    const str = String(value).trim();
+    return str || null;
 }
 
-function n(value) {
-    if (value == null || value === '') return null;
-    if (typeof value === 'number' && !Number.isNaN(value)) return value;
-
-    let text = String(value).trim();
-    if (!text) return null;
-
-    const neg = text.includes('(') && text.includes(')');
-    text = text
-        .replace(/\$/g, '')
-        .replace(/,/g, '')
-        .replace(/\s+/g, '')
-        .replace(/[()]/g, '');
-
-    const parsed = Number(text);
-    if (Number.isNaN(parsed)) return null;
-
-    return neg ? -Math.abs(parsed) : parsed;
-}
-
-function s(value) {
-    if (value == null) return null;
-    const text = String(value).trim();
-    return text === '' ? null : text;
-}
-
-function normalizePropertyName(name) {
-    if (!name) return null;
-
-    const raw = String(name).trim();
-    const map = {
-        'The boys': 'The Boys',
-        'The boys ': 'The Boys',
-        'The Boys ': 'The Boys',
-        'Riverview boys': 'The Boys',
-        'Riverview Boys': 'The Boys',
-        'Riverview': 'Carlton Fields Dr',
-        'Riverview ': 'Carlton Fields Dr',
-        'Riverview rental': 'Carlton Fields Dr',
-        'Fishhawk': 'Bridgecrossing Dr',
-        'Fishhawk ': 'Bridgecrossing Dr',
-        'Bridgecrossing': 'Bridgecrossing Dr',
-        'Bridge Crossing': 'Bridgecrossing Dr',
-        'Bloomingdale': 'Brookville Dr',
-        'Blue Plume': 'Blue Plume Ct',
-        'Blue Plume ': 'Blue Plume Ct',
-        'SouthCreek': 'Blue Plume Ct',
-        'SouthCreek ': 'Blue Plume Ct',
-        'Carlton Fields': 'Carlton Fields Dr'
-    };
-
-    return map[raw] || raw;
-}
-
-function detectYearTag(sheetName) {
-    const match = String(sheetName).match(/(20)?(\d{2})$/);
-    if (!match) return null;
-
-    const yy = Number(match[2]);
-    return yy >= 70 ? 1900 + yy : 2000 + yy;
-}
-
-function addIssue(importId, sheet, type, row, payload, message) {
-    db.prepare(`
-    INSERT INTO import_issues (
-      import_id, sheet_name, issue_type, row_number, raw_payload, message
-    ) VALUES (?, ?, ?, ?, ?, ?)
-  `).run(importId, sheet, type, row, JSON.stringify(payload ?? {}), message);
-}
-
-function getCanonicalPropertySet(workbook) {
-    const set = new Set();
-
-    const manual = [
-        'Blue Plume Ct',
-        'Bridgecrossing Dr',
-        'Brookville Dr',
-        'Carlton Fields Dr',
-        'The Boys',
-        'Vistazo',
-        'Sedona'
-    ];
-    manual.forEach(name => set.add(normalizePropertyName(name)));
-
-    const sheetName = workbook.SheetNames.find(name => /^Property Values$/i.test(name));
-    if (!sheetName) return set;
-
-    const ws = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
-
-    for (const r of rows) {
-        const raw = s(r['Address '] || r['Address']);
-        const normalized = normalizePropertyName(raw);
-        if (normalized) set.add(normalized);
+function pick(obj, keys) {
+    for (const key of keys) {
+        if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') return obj[key];
     }
-
-    return set;
+    return null;
 }
 
-function sanitizeImportedPropertyName(name, validProperties) {
-    const normalized = normalizePropertyName(name);
-    if (!normalized) return null;
-    return validProperties.has(normalized) ? normalized : null;
-}
-
-function getLatestImportId() {
-    const latest = db.prepare('SELECT id FROM imports ORDER BY id DESC LIMIT 1').get();
-    return latest ? latest.id : null;
-}
-
-function importWorkbook(filePath, originalName) {
-    const workbook = XLSX.readFile(filePath, { cellDates: true });
-    const validProperties = getCanonicalPropertySet(workbook);
-
-    const importInfo = db.prepare(`
-    INSERT INTO imports (filename, imported_at, sheet_count, row_count, notes)
-    VALUES (?, datetime('now'), ?, ?, ?)
-  `).run(originalName, workbook.SheetNames.length, 0, 'Initial import');
-
-    const importId = importInfo.lastInsertRowid;
-
-    const insertAccount = db.prepare(`
-    INSERT INTO account_snapshots (
-      import_id, snapshot_date, bank, account_type, account_num, routing, balance, source_sheet
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-    const insertTxn = db.prepare(`
-    INSERT INTO transactions (
-      import_id, txn_date, property_name, amount, reason,
-      income_amount, expense_amount, year_tag, source_sheet, source_category
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-    const insertValue = db.prepare(`
-    INSERT INTO property_values (
-      import_id, address, purchased, estimate, snapshot_date,
-      profit_loss, alt_estimate, alt_snapshot_date
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-    let rowCount = 0;
-    const ignoredSheets = new Set(['Cleanup Notes']);
-
-    for (const sheetName of workbook.SheetNames) {
-        if (ignoredSheets.has(sheetName)) continue;
-
-        const ws = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
-
-        if (/^Accounts$/i.test(sheetName)) {
-            for (let i = 0; i < rows.length; i++) {
-                const r = rows[i];
-                const rawBalance = r['Balance'] ?? r['Balance '] ?? r['BALANCE'] ?? null;
-
-                if (!r['DATE'] && !r['Bank'] && rawBalance == null) continue;
-                if (!r['Bank'] || r['Bank'] === 'Bank') continue;
-                if (!r['Acct type'] && !r['ACCT NUM'] && !r['ROUTING'] && !r['Bank']) continue;
-
-                const balance = n(rawBalance);
-                if (balance == null) {
-                    addIssue(
-                        importId,
-                        sheetName,
-                        'invalid_account_balance',
-                        i + 2,
-                        r,
-                        `Balance could not be parsed from value: ${rawBalance}`
-                    );
-                    continue;
-                }
-
-                insertAccount.run(
-                    importId,
-                    excelDateToIso(r['DATE']),
-                    s(r['Bank']),
-                    s(r['Acct type']),
-                    s(r['ACCT NUM']),
-                    s(r['ROUTING']),
-                    balance,
-                    sheetName
-                );
-
-                rowCount++;
-            }
-            continue;
-        }
-
-        if (/^Payments\s\d+/i.test(sheetName) || /^Taxes\s\d+/i.test(sheetName)) {
-            const yearTag = detectYearTag(sheetName);
-            const baseCategory = /^Taxes/i.test(sheetName) ? 'taxes' : 'payments';
-
-            for (let i = 0; i < rows.length; i++) {
-                const r = rows[i];
-                const date = r['Date'] || r['DATE'];
-                const propertyLabel = r['Property '] || r['Property'] || null;
-                let amount = n(r['Amount ']) ?? n(r['Amount']);
-                const reason = r['Reason '] || r['Reason'] || null;
-
-                const incomeKey = Object.keys(r).find(k => String(k).startsWith('Income'));
-                const expenseKey = Object.keys(r).find(k => String(k).startsWith('Expenses'));
-
-                const income = incomeKey ? n(r[incomeKey]) : null;
-                const expense = expenseKey ? n(r[expenseKey]) : null;
-
-                if (!date && !propertyLabel && amount == null && !reason) continue;
-
-                if (amount == null && income != null) amount = income;
-                if (amount == null && expense != null) amount = expense;
-
-                if (amount == null) {
-                    addIssue(importId, sheetName, 'invalid_transaction_amount', i + 2, r, 'Amount could not be parsed');
-                    continue;
-                }
-
-                const safeProperty = sanitizeImportedPropertyName(propertyLabel, validProperties);
-
-                let categoryLabel = baseCategory;
-                const nonPropertySet = new Set(['Taxes', 'All', 'Expense', 'Charity', 'Vacation', 'Boca', 'Singer', 'Busch G']);
-
-                if (propertyLabel && !safeProperty) {
-                    const trimmed = String(propertyLabel).trim();
-                    if (nonPropertySet.has(trimmed)) {
-                        categoryLabel = trimmed;
-                    } else {
-                        addIssue(
-                            importId,
-                            sheetName,
-                            'unmatched_property_name',
-                            i + 2,
-                            r,
-                            `Ignored non-portfolio property label: ${propertyLabel}`
-                        );
-                    }
-                }
-
-                insertTxn.run(
-                    importId,
-                    excelDateToIso(date),
-                    safeProperty,
-                    amount,
-                    s(reason),
-                    income,
-                    expense,
-                    yearTag,
-                    sheetName,
-                    categoryLabel
-                );
-
-                rowCount++;
-            }
-            continue;
-        }
-
-        if (/^Property Values$/i.test(sheetName)) {
-            for (let i = 0; i < rows.length; i++) {
-                const r = rows[i];
-                if (!r['Address '] && !r['Purchased '] && !r['Estimate ']) continue;
-
-                insertValue.run(
-                    importId,
-                    normalizePropertyName(s(r['Address '] || r['Address'])),
-                    n(r['Purchased ']),
-                    n(r['Estimate ']),
-                    excelDateToIso(r['Unnamed: 3']),
-                    n(r['Profit/Loss']),
-                    n(r['Unnamed: 5']),
-                    excelDateToIso(r['Unnamed: 6'])
-                );
-
-                rowCount++;
-            }
-            continue;
-        }
-
-        addIssue(importId, sheetName, 'unmapped_sheet', null, null, `Sheet "${sheetName}" was not imported.`);
-    }
-
-    db.prepare('UPDATE imports SET row_count = ? WHERE id = ?').run(rowCount, importId);
-    return importId;
-}
-
-app.get('/', (req, res) => {
-    const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
-    const hasData = db.prepare('SELECT COUNT(*) AS c FROM transactions').get().c > 0;
-
-    if (!hasData) {
-        return res.redirect('/setup');
-    }
-
-    const stats = {
-        accounts: db.prepare('SELECT COUNT(*) AS c FROM account_snapshots').get().c,
-        transactions: db.prepare('SELECT COUNT(*) AS c FROM transactions').get().c,
-        properties: db.prepare(`
-            SELECT COUNT(DISTINCT property_name) AS c
-            FROM transactions
-            WHERE property_name IS NOT NULL AND TRIM(property_name) <> ''
-        `).get().c,
-        issues: latestImport
-            ? db.prepare('SELECT COUNT(*) AS c FROM import_issues WHERE import_id = ?').get(latestImport.id).c
-            : 0
-    };
-
-    const recentTransactions = db.prepare(`
-        SELECT txn_date, property_name, reason, amount, source_category
-        FROM transactions
-        ORDER BY COALESCE(txn_date, '0000-00-00') DESC, id DESC
-        LIMIT 20
-    `).all();
-
-    const monthlyCashFlow = db.prepare(`
-        SELECT
-          property_name,
-          ROUND(SUM(COALESCE(income_amount, CASE WHEN amount > 0 THEN amount ELSE 0 END)), 2) AS income_total,
-          ROUND(ABS(SUM(COALESCE(expense_amount, CASE WHEN amount < 0 THEN amount ELSE 0 END))), 2) AS expense_total,
-          ROUND(SUM(amount), 2) AS net_total
-        FROM transactions
-        WHERE property_name IS NOT NULL
-          AND substr(txn_date, 1, 7) = strftime('%Y-%m', 'now')
-        GROUP BY property_name
-        ORDER BY property_name
-    `).all();
-
-    const latestPropertyValues = db.prepare(`
-        SELECT address, estimate, profit_loss, snapshot_date
-        FROM property_values
-        ORDER BY COALESCE(snapshot_date, '') DESC, address
-        LIMIT 20
-    `).all();
-
-    res.render('index', {
-        latestImport,
-        stats,
-        recentTransactions,
-        monthlyCashFlow,
-        latestPropertyValues
-    });
-});
-
-app.get('/setup', (req, res) => {
+function getDashboardStats() {
     const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
     const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 10').all();
 
-    res.render('setup', { latestImport, recentImports });
+    const stats = {
+        importCount: db.prepare('SELECT COUNT(*) AS count FROM imports').get().count,
+        transactionCount: db.prepare('SELECT COUNT(*) AS count FROM transactions').get().count,
+        accountCount: db.prepare('SELECT COUNT(*) AS count FROM account_snapshots').get().count,
+        propertyValueCount: db.prepare('SELECT COUNT(*) AS count FROM property_values').get().count,
+        issueCount: db.prepare('SELECT COUNT(*) AS count FROM import_issues').get().count
+    };
+
+    return { latestImport, recentImports, stats };
+}
+
+app.get('/', (req, res) => {
+    const { latestImport, recentImports, stats } = getDashboardStats();
+    res.render('index', { latestImport, recentImports, stats });
+});
+
+app.get('/setup', (req, res) => {
+    const { latestImport, recentImports, stats } = getDashboardStats();
+    res.render('setup', { latestImport, recentImports, stats });
+});
+
+app.post('/setup/import', upload.single('workbook'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).send('No file uploaded.');
+    }
+
+    const workbook = XLSX.readFile(req.file.path);
+    const importedAt = new Date().toISOString();
+
+    const insertImport = db.prepare(`
+    INSERT INTO imports (filename, imported_at, sheet_count, row_count, notes)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+
+    const insertAccount = db.prepare(`
+    INSERT INTO account_snapshots (import_id, account_name, balance, as_of)
+    VALUES (?, ?, ?, ?)
+  `);
+
+    const insertTxn = db.prepare(`
+    INSERT INTO transactions (import_id, property_name, txn_date, description, category, amount, direction, source_row)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+    const insertPropertyValue = db.prepare(`
+    INSERT INTO property_values (import_id, property_name, property_value, as_of)
+    VALUES (?, ?, ?, ?)
+  `);
+
+    const insertIssue = db.prepare(`
+    INSERT INTO import_issues (import_id, issue_type, message, row_number)
+    VALUES (?, ?, ?, ?)
+  `);
+
+    const importResult = insertImport.run(req.file.originalname, importedAt, workbook.SheetNames.length, 0, null);
+    const importId = importResult.lastInsertRowid;
+
+    let rowCount = 0;
+
+    try {
+        workbook.SheetNames.forEach((sheetName) => {
+            const sheet = workbook.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+
+            rows.forEach((row, index) => {
+                rowCount += 1;
+
+                const lowerRow = {};
+                Object.keys(row).forEach((key) => {
+                    lowerRow[String(key).trim().toLowerCase()] = row[key];
+                });
+
+                const accountName = pick(lowerRow, ['account', 'account name', 'name']);
+                const balance = toNumber(pick(lowerRow, ['balance', 'ending balance', 'current balance']));
+                const asOf = normalizeDate(pick(lowerRow, ['as of', 'date', 'snapshot date']));
+
+                const propertyName = pick(lowerRow, ['property', 'property name']);
+                const txnDate = normalizeDate(pick(lowerRow, ['transaction date', 'date', 'txn date']));
+                const description = pick(lowerRow, ['description', 'memo', 'notes']);
+                const category = pick(lowerRow, ['category', 'type']);
+                const amount = toNumber(pick(lowerRow, ['amount', 'net', 'transaction amount']));
+                const direction = pick(lowerRow, ['direction', 'income/expense', 'flow']);
+                const propertyValue = toNumber(pick(lowerRow, ['property value', 'value', 'valuation']));
+
+                if (accountName && balance !== null) {
+                    insertAccount.run(importId, accountName, balance, asOf);
+                }
+
+                if (propertyName && amount !== null) {
+                    insertTxn.run(importId, propertyName, txnDate, description, category, amount, direction, index + 2);
+                }
+
+                if (propertyName && propertyValue !== null) {
+                    insertPropertyValue.run(importId, propertyName, propertyValue, asOf);
+                }
+
+                if (!accountName && !propertyName && amount === null && propertyValue === null) {
+                    insertIssue.run(importId, 'unmapped_row', `Could not classify row from sheet "${sheetName}"`, index + 2);
+                }
+            });
+        });
+
+        db.prepare('UPDATE imports SET row_count = ? WHERE id = ?').run(rowCount, importId);
+        fs.unlinkSync(req.file.path);
+        res.redirect(`/imports/${importId}`);
+    } catch (err) {
+        console.error(err);
+        try {
+            db.prepare('DELETE FROM import_issues WHERE import_id = ?').run(importId);
+            db.prepare('DELETE FROM transactions WHERE import_id = ?').run(importId);
+            db.prepare('DELETE FROM property_values WHERE import_id = ?').run(importId);
+            db.prepare('DELETE FROM account_snapshots WHERE import_id = ?').run(importId);
+            db.prepare('DELETE FROM imports WHERE id = ?').run(importId);
+        } catch (cleanupErr) {
+            console.error(cleanupErr);
+        }
+        try {
+            fs.unlinkSync(req.file.path);
+        } catch (_) { }
+        res.status(500).send('Import failed.');
+    }
 });
 
 app.get('/data/imports', (req, res) => {
     const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
-
-    const stats = latestImport
-        ? {
-            accounts: db.prepare('SELECT COUNT(*) AS c FROM account_snapshots WHERE import_id = ?').get(latestImport.id).c,
-            transactions: db.prepare('SELECT COUNT(*) AS c FROM transactions WHERE import_id = ?').get(latestImport.id).c,
-            properties: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
-            values: db.prepare('SELECT COUNT(*) AS c FROM property_values WHERE import_id = ?').get(latestImport.id).c,
-            issues: db.prepare('SELECT COUNT(*) AS c FROM import_issues WHERE import_id = ?').get(latestImport.id).c
-        }
-        : null;
-
+    const stats = {
+        importCount: db.prepare('SELECT COUNT(*) AS count FROM imports').get().count,
+        transactionCount: db.prepare('SELECT COUNT(*) AS count FROM transactions').get().count,
+        accountCount: db.prepare('SELECT COUNT(*) AS count FROM account_snapshots').get().count,
+        propertyValueCount: db.prepare('SELECT COUNT(*) AS count FROM property_values').get().count,
+        issueCount: db.prepare('SELECT COUNT(*) AS count FROM import_issues').get().count
+    };
     const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 25').all();
     res.render('imports', { latestImport, stats, recentImports });
 });
 
-app.post('/import', upload.single('financialFile'), (req, res) => {
-    if (!req.file) return res.status(400).send('No file uploaded');
+app.get('/imports/:id', (req, res) => {
+    const importId = Number(req.params.id);
 
-    const importId = importWorkbook(req.file.path, req.file.originalname);
-    res.redirect(`/imports/${importId}`);
+    if (!Number.isInteger(importId) || importId <= 0) {
+        return res.status(400).send('Invalid import ID.');
+    }
+
+    const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(importId);
+    if (!imp) {
+        return res.status(404).send('Import not found.');
+    }
+
+    const accounts = db.prepare(`
+    SELECT *
+    FROM account_snapshots
+    WHERE import_id = ?
+    ORDER BY account_name, as_of
+  `).all(importId);
+
+    const properties = db.prepare(`
+    SELECT
+      property_name,
+      COUNT(*) AS txn_count,
+      SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS income_total,
+      SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) AS expense_total,
+      SUM(amount) AS net_total
+    FROM transactions
+    WHERE import_id = ?
+    GROUP BY property_name
+    ORDER BY property_name
+  `).all(importId);
+
+    const propertyValues = db.prepare(`
+    SELECT *
+    FROM property_values
+    WHERE import_id = ?
+    ORDER BY property_name, as_of
+  `).all(importId);
+
+    const issues = db.prepare(`
+    SELECT *
+    FROM import_issues
+    WHERE import_id = ?
+    ORDER BY row_number, id
+  `).all(importId);
+
+    res.render('import-detail', {
+        imp,
+        accounts,
+        properties,
+        propertyValues,
+        issues
+    });
 });
 
 app.post('/imports/rollback-last', (req, res) => {
+    const latest = db.prepare('SELECT id FROM imports ORDER BY id DESC LIMIT 1').get();
+
+    if (!latest) {
+        return res.status(404).send('No imports found to roll back.');
+    }
+
+    const importId = latest.id;
+
+    const rollbackImport = db.transaction((id) => {
+        db.prepare('DELETE FROM import_issues WHERE import_id = ?').run(id);
+        db.prepare('DELETE FROM transactions WHERE import_id = ?').run(id);
+        db.prepare('DELETE FROM property_values WHERE import_id = ?').run(id);
+        db.prepare('DELETE FROM account_snapshots WHERE import_id = ?').run(id);
+        db.prepare('DELETE FROM imports WHERE id = ?').run(id);
+    });
+
     try {
-        const lastImport = db.prepare(`
-            SELECT id, filename, imported_at, row_count
-            FROM imports
-            ORDER BY id DESC
-            LIMIT 1
-        `).get();
-
-        if (!lastImport) {
-            return res.status(404).send('No imports found to roll back.');
-        }
-
-        const rollbackLastImport = db.transaction((importId) => {
-            db.prepare(`DELETE FROM import_issues WHERE import_id = ?`).run(importId);
-            db.prepare(`DELETE FROM transactions WHERE import_id = ?`).run(importId);
-            db.prepare(`DELETE FROM property_values WHERE import_id = ?`).run(importId);
-            db.prepare(`DELETE FROM account_snapshots WHERE import_id = ?`).run(importId);
-            db.prepare(`DELETE FROM imports WHERE id = ?`).run(importId);
-        });
-
-        rollbackLastImport(lastImport.id);
-
+        rollbackImport(importId);
         res.redirect('/setup');
     } catch (err) {
-        console.error('Rollback failed:', err);
-        res.status(500).send('Failed to roll back last import.');
+        console.error(err);
+        res.status(500).send('Failed to roll back latest import.');
+    }
+});
+
+app.post('/imports/:id/rollback', (req, res) => {
+    const importId = Number(req.params.id);
+
+    if (!Number.isInteger(importId) || importId <= 0) {
+        return res.status(400).send('Invalid import ID.');
+    }
+
+    const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(importId);
+    if (!imp) {
+        return res.status(404).send('Import not found.');
+    }
+
+    const rollbackImport = db.transaction((id) => {
+        db.prepare('DELETE FROM import_issues WHERE import_id = ?').run(id);
+        db.prepare('DELETE FROM transactions WHERE import_id = ?').run(id);
+        db.prepare('DELETE FROM property_values WHERE import_id = ?').run(id);
+        db.prepare('DELETE FROM account_snapshots WHERE import_id = ?').run(id);
+        db.prepare('DELETE FROM imports WHERE id = ?').run(id);
+    });
+
+    try {
+        rollbackImport(importId);
+        res.redirect('/data/imports');
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Failed to roll back import.');
     }
 });
 
 app.get('/expenses/new', (req, res) => {
-    const latestImportId = getLatestImportId();
-
-    const properties = latestImportId
-        ? db.prepare(`
-        SELECT property_name
-        FROM (
-          SELECT DISTINCT address AS property_name
-          FROM property_values
-          WHERE import_id = ? AND address IS NOT NULL AND TRIM(address) <> ''
-          UNION
-          SELECT DISTINCT property_name
-          FROM transactions
-          WHERE import_id = ? AND property_name IS NOT NULL AND TRIM(property_name) <> ''
-        )
-        ORDER BY property_name
-      `).all(latestImportId, latestImportId)
-        : [];
-
-    res.render('add-expense', {
-        latestImportId,
-        properties,
-        success: req.query.success || '',
-        error: req.query.error || (latestImportId ? '' : 'Please import a workbook before adding expenses.')
-    });
-});
-
-app.post('/expenses', (req, res) => {
-    const latestImportId = getLatestImportId();
-
-    if (!latestImportId) {
-        return res.redirect('/expenses/new?error=' + encodeURIComponent('Please import a workbook before adding expenses.'));
-    }
-
-    const txnDate = s(req.body.txn_date);
-    const propertyName = s(req.body.property_name);
-    const amountValue = n(req.body.amount);
-    const reason = s(req.body.reason);
-    const category = s(req.body.category);
-
-    if (!txnDate || !propertyName || !reason || amountValue == null) {
-        return res.redirect('/expenses/new?error=' + encodeURIComponent('Date, property, amount, and reason are required.'));
-    }
-
-    const expenseAmount = Math.abs(amountValue);
-
-    db.prepare(`
-    INSERT INTO transactions (
-      import_id, txn_date, property_name, amount, reason,
-      income_amount, expense_amount, year_tag, source_sheet, source_category
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-        latestImportId,
-        txnDate,
-        normalizePropertyName(propertyName),
-        -expenseAmount,
-        reason,
-        null,
-        expenseAmount,
-        null,
-        'Manual Entry',
-        category || 'manual-expense'
-    );
-
-    res.redirect('/expenses/new?success=' + encodeURIComponent('Expense saved.'));
+    res.send('Add expense page placeholder');
 });
 
 app.get('/sales/new', (req, res) => {
-    const latestImportId = getLatestImportId();
-
-    const properties = latestImportId
-        ? db.prepare(`
-        SELECT DISTINCT address AS property_name
-        FROM property_values
-        WHERE import_id = ? AND address IS NOT NULL AND TRIM(address) <> ''
-        ORDER BY address
-      `).all(latestImportId)
-        : [];
-
-    res.render('add-sale', {
-        properties,
-        success: req.query.success || '',
-        error: req.query.error || ''
-    });
-});
-
-app.post('/sales', (req, res) => {
-    const latestImportId = getLatestImportId();
-
-    if (!latestImportId) {
-        return res.redirect('/sales/new?error=' + encodeURIComponent('Please import a workbook before recording a sale.'));
-    }
-
-    const txnDate = s(req.body.txn_date);
-    const propertyName = s(req.body.property_name);
-    const salePrice = n(req.body.sale_price);
-    const reason = s(req.body.reason) || 'Property sale';
-
-    if (!txnDate || !propertyName || salePrice == null) {
-        return res.redirect('/sales/new?error=' + encodeURIComponent('Sale date, property, and sale price are required.'));
-    }
-
-    db.prepare(`
-    INSERT INTO transactions (
-      import_id, txn_date, property_name, amount, reason,
-      income_amount, expense_amount, year_tag, source_sheet, source_category
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-        latestImportId,
-        txnDate,
-        normalizePropertyName(propertyName),
-        salePrice,
-        reason,
-        salePrice,
-        null,
-        null,
-        'Manual Sale',
-        'manual-sale'
-    );
-
-    res.redirect('/sales/new?success=' + encodeURIComponent('Sale saved.'));
-});
-
-app.get('/imports/:id', (req, res) => {
-    const importId = Number(req.params.id);
-    const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(importId);
-
-    if (!imp) return res.status(404).send('Import not found');
-
-    const accounts = db.prepare(`
-    SELECT * FROM account_snapshots
-    WHERE import_id = ?
-    ORDER BY snapshot_date DESC, bank
-  `).all(importId);
-
-    const properties = db.prepare(`
-    SELECT
-      property_name,
-      COUNT(*) AS txn_count,
-      ROUND(SUM(COALESCE(income_amount, CASE WHEN amount > 0 THEN amount ELSE 0 END)), 2) AS income_total,
-      ROUND(ABS(SUM(COALESCE(expense_amount, CASE WHEN amount < 0 THEN amount ELSE 0 END))), 2) AS expense_total,
-      ROUND(SUM(amount), 2) AS net_total
-    FROM transactions
-    WHERE import_id = ? AND property_name IS NOT NULL
-    GROUP BY property_name
-    ORDER BY net_total DESC
-  `).all(importId);
-
-    const propertyValues = db.prepare(`
-    SELECT * FROM property_values
-    WHERE import_id = ?
-    ORDER BY address
-  `).all(importId);
-
-    const issues = db.prepare(`
-    SELECT * FROM import_issues
-    WHERE import_id = ?
-    ORDER BY sheet_name, row_number
-    LIMIT 100
-  `).all(importId);
-
-    res.render('import-detail', { imp, accounts, properties, propertyValues, issues });
-});
-
-app.get('/reports/cash-flow', (req, res) => {
-    const latestImportId = getLatestImportId();
-
-    if (!latestImportId) {
-        return res.status(400).send('No imports found');
-    }
-
-    const propertyFilter = s(req.query.property_name);
-    const params = [latestImportId];
-
-    let where = 'import_id = ? AND property_name IS NOT NULL';
-    if (propertyFilter) {
-        where += ' AND property_name = ?';
-        params.push(propertyFilter);
-    }
-
-    const rows = db.prepare(`
-    SELECT
-      property_name,
-      substr(txn_date, 1, 7) AS month,
-      COUNT(*) AS txn_count,
-      ROUND(SUM(COALESCE(income_amount, CASE WHEN amount > 0 THEN amount ELSE 0 END)), 2) AS income_total,
-      ROUND(ABS(SUM(COALESCE(expense_amount, CASE WHEN amount < 0 THEN amount ELSE 0 END))), 2) AS expense_total,
-      ROUND(SUM(amount), 2) AS net_total
-    FROM transactions
-    WHERE ${where}
-    GROUP BY property_name, month
-    ORDER BY property_name, month
-  `).all(...params);
-
-    const properties = db.prepare(`
-    SELECT DISTINCT property_name
-    FROM transactions
-    WHERE import_id = ?
-      AND property_name IS NOT NULL
-    ORDER BY property_name
-  `).all(latestImportId);
-
-    res.render('cash-flow-report', {
-        latestImportId,
-        propertyFilter,
-        properties,
-        rows
-    });
+    res.send('Record sale page placeholder');
 });
 
 app.listen(PORT, () => {
-    console.log(`Financial importer running on http://localhost:${PORT}`);
+    console.log(`Server listening on port ${PORT}`);
+});
 });
