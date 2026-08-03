@@ -10,16 +10,24 @@ const PORT = process.env.PORT || 3000;
 
 const dataDir = path.join(__dirname, 'data');
 const uploadsDir = path.join(__dirname, 'uploads');
+const publicDir = path.join(__dirname, 'public');
+const viewsDir = path.join(__dirname, 'views');
+
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(uploadsDir, { recursive: true });
+fs.mkdirSync(publicDir, { recursive: true });
+fs.mkdirSync(viewsDir, { recursive: true });
 
 const db = new Database(path.join(dataDir, 'financials.db'));
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
 
+app.set('views', viewsDir);
 app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
+
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(publicDir));
 
 const upload = multer({ dest: uploadsDir });
 
@@ -40,7 +48,7 @@ CREATE TABLE IF NOT EXISTS account_snapshots (
   balance REAL,
   as_of TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(import_id) REFERENCES imports(id)
+  FOREIGN KEY(import_id) REFERENCES imports(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -54,7 +62,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   direction TEXT,
   source_row INTEGER,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(import_id) REFERENCES imports(id)
+  FOREIGN KEY(import_id) REFERENCES imports(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS property_values (
@@ -64,7 +72,7 @@ CREATE TABLE IF NOT EXISTS property_values (
   property_value REAL,
   as_of TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(import_id) REFERENCES imports(id)
+  FOREIGN KEY(import_id) REFERENCES imports(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS import_issues (
@@ -74,60 +82,85 @@ CREATE TABLE IF NOT EXISTS import_issues (
   message TEXT,
   row_number INTEGER,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(import_id) REFERENCES imports(id)
+  FOREIGN KEY(import_id) REFERENCES imports(id) ON DELETE CASCADE
 );
 `);
 
 function toNumber(value) {
     if (value == null || value === '') return null;
     if (typeof value === 'number') return value;
-    const cleaned = String(value).replace(/[$,()]/g, '').trim();
+
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    const negativeByParens = raw.startsWith('(') && raw.endsWith(')');
+    const cleaned = raw.replace(/[$,()]/g, '').trim();
     if (!cleaned) return null;
+
     const num = Number(cleaned);
-    return Number.isNaN(num) ? null : num;
+    if (Number.isNaN(num)) return null;
+    return negativeByParens ? -Math.abs(num) : num;
 }
 
 function normalizeDate(value) {
     if (!value) return null;
+
     if (typeof value === 'number') {
         const parsed = XLSX.SSF.parse_date_code(value);
         if (!parsed) return null;
         return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
     }
+
     const str = String(value).trim();
     return str || null;
 }
 
 function pick(obj, keys) {
     for (const key of keys) {
-        if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') return obj[key];
+        if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
+            return obj[key];
+        }
     }
     return null;
 }
 
-function getDashboardStats() {
-    const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
-    const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 10').all();
-
-    const stats = {
+function getStats() {
+    return {
         importCount: db.prepare('SELECT COUNT(*) AS count FROM imports').get().count,
         transactionCount: db.prepare('SELECT COUNT(*) AS count FROM transactions').get().count,
         accountCount: db.prepare('SELECT COUNT(*) AS count FROM account_snapshots').get().count,
         propertyValueCount: db.prepare('SELECT COUNT(*) AS count FROM property_values').get().count,
         issueCount: db.prepare('SELECT COUNT(*) AS count FROM import_issues').get().count
     };
+}
 
-    return { latestImport, recentImports, stats };
+function getLatestImport() {
+    return db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
+}
+
+function getRecentImports(limit = 10) {
+    return db.prepare(`
+    SELECT *
+    FROM imports
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(limit);
 }
 
 app.get('/', (req, res) => {
-    const { latestImport, recentImports, stats } = getDashboardStats();
-    res.render('index', { latestImport, recentImports, stats });
+    res.render('index', {
+        latestImport: getLatestImport(),
+        recentImports: getRecentImports(10),
+        stats: getStats()
+    });
 });
 
 app.get('/setup', (req, res) => {
-    const { latestImport, recentImports, stats } = getDashboardStats();
-    res.render('setup', { latestImport, recentImports, stats });
+    res.render('setup', {
+        latestImport: getLatestImport(),
+        recentImports: getRecentImports(10),
+        stats: getStats()
+    });
 });
 
 app.post('/setup/import', upload.single('workbook'), (req, res) => {
@@ -135,114 +168,131 @@ app.post('/setup/import', upload.single('workbook'), (req, res) => {
         return res.status(400).send('No file uploaded.');
     }
 
-    const workbook = XLSX.readFile(req.file.path);
-    const importedAt = new Date().toISOString();
-
-    const insertImport = db.prepare(`
-    INSERT INTO imports (filename, imported_at, sheet_count, row_count, notes)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
-    const insertAccount = db.prepare(`
-    INSERT INTO account_snapshots (import_id, account_name, balance, as_of)
-    VALUES (?, ?, ?, ?)
-  `);
-
-    const insertTxn = db.prepare(`
-    INSERT INTO transactions (import_id, property_name, txn_date, description, category, amount, direction, source_row)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-    const insertPropertyValue = db.prepare(`
-    INSERT INTO property_values (import_id, property_name, property_value, as_of)
-    VALUES (?, ?, ?, ?)
-  `);
-
-    const insertIssue = db.prepare(`
-    INSERT INTO import_issues (import_id, issue_type, message, row_number)
-    VALUES (?, ?, ?, ?)
-  `);
-
-    const importResult = insertImport.run(req.file.originalname, importedAt, workbook.SheetNames.length, 0, null);
-    const importId = importResult.lastInsertRowid;
-
-    let rowCount = 0;
-
     try {
-        workbook.SheetNames.forEach((sheetName) => {
-            const sheet = workbook.Sheets[sheetName];
-            const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+        const workbook = XLSX.readFile(req.file.path);
+        const importedAt = new Date().toISOString();
 
-            rows.forEach((row, index) => {
-                rowCount += 1;
+        const insertImport = db.prepare(`
+      INSERT INTO imports (filename, imported_at, sheet_count, row_count, notes)
+      VALUES (?, ?, ?, ?, ?)
+    `);
 
-                const lowerRow = {};
-                Object.keys(row).forEach((key) => {
-                    lowerRow[String(key).trim().toLowerCase()] = row[key];
+        const insertAccount = db.prepare(`
+      INSERT INTO account_snapshots (import_id, account_name, balance, as_of)
+      VALUES (?, ?, ?, ?)
+    `);
+
+        const insertTxn = db.prepare(`
+      INSERT INTO transactions (import_id, property_name, txn_date, description, category, amount, direction, source_row)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+        const insertPropertyValue = db.prepare(`
+      INSERT INTO property_values (import_id, property_name, property_value, as_of)
+      VALUES (?, ?, ?, ?)
+    `);
+
+        const insertIssue = db.prepare(`
+      INSERT INTO import_issues (import_id, issue_type, message, row_number)
+      VALUES (?, ?, ?, ?)
+    `);
+
+        const runImport = db.transaction(() => {
+            const importResult = insertImport.run(
+                req.file.originalname,
+                importedAt,
+                workbook.SheetNames.length,
+                0,
+                null
+            );
+
+            const importId = Number(importResult.lastInsertRowid);
+            let rowCount = 0;
+
+            workbook.SheetNames.forEach((sheetName) => {
+                const sheet = workbook.Sheets[sheetName];
+                const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+
+                rows.forEach((row, index) => {
+                    rowCount += 1;
+
+                    const lowerRow = {};
+                    Object.keys(row).forEach((key) => {
+                        lowerRow[String(key).trim().toLowerCase()] = row[key];
+                    });
+
+                    const accountName = pick(lowerRow, ['account', 'account name', 'name']);
+                    const balance = toNumber(pick(lowerRow, ['balance', 'ending balance', 'current balance']));
+                    const asOf = normalizeDate(pick(lowerRow, ['as of', 'date', 'snapshot date']));
+
+                    const propertyName = pick(lowerRow, ['property', 'property name']);
+                    const txnDate = normalizeDate(pick(lowerRow, ['transaction date', 'date', 'txn date']));
+                    const description = pick(lowerRow, ['description', 'memo', 'notes']);
+                    const category = pick(lowerRow, ['category', 'type']);
+                    const amount = toNumber(pick(lowerRow, ['amount', 'net', 'transaction amount']));
+                    const direction = pick(lowerRow, ['direction', 'income/expense', 'flow']);
+                    const propertyValue = toNumber(pick(lowerRow, ['property value', 'value', 'valuation']));
+
+                    if (accountName && balance !== null) {
+                        insertAccount.run(importId, accountName, balance, asOf);
+                    }
+
+                    if (propertyName && amount !== null) {
+                        insertTxn.run(
+                            importId,
+                            propertyName,
+                            txnDate,
+                            description,
+                            category,
+                            amount,
+                            direction,
+                            index + 2
+                        );
+                    }
+
+                    if (propertyName && propertyValue !== null) {
+                        insertPropertyValue.run(importId, propertyName, propertyValue, asOf);
+                    }
+
+                    if (!accountName && !propertyName && amount === null && propertyValue === null) {
+                        insertIssue.run(
+                            importId,
+                            'unmapped_row',
+                            `Could not classify row from sheet "${sheetName}"`,
+                            index + 2
+                        );
+                    }
                 });
-
-                const accountName = pick(lowerRow, ['account', 'account name', 'name']);
-                const balance = toNumber(pick(lowerRow, ['balance', 'ending balance', 'current balance']));
-                const asOf = normalizeDate(pick(lowerRow, ['as of', 'date', 'snapshot date']));
-
-                const propertyName = pick(lowerRow, ['property', 'property name']);
-                const txnDate = normalizeDate(pick(lowerRow, ['transaction date', 'date', 'txn date']));
-                const description = pick(lowerRow, ['description', 'memo', 'notes']);
-                const category = pick(lowerRow, ['category', 'type']);
-                const amount = toNumber(pick(lowerRow, ['amount', 'net', 'transaction amount']));
-                const direction = pick(lowerRow, ['direction', 'income/expense', 'flow']);
-                const propertyValue = toNumber(pick(lowerRow, ['property value', 'value', 'valuation']));
-
-                if (accountName && balance !== null) {
-                    insertAccount.run(importId, accountName, balance, asOf);
-                }
-
-                if (propertyName && amount !== null) {
-                    insertTxn.run(importId, propertyName, txnDate, description, category, amount, direction, index + 2);
-                }
-
-                if (propertyName && propertyValue !== null) {
-                    insertPropertyValue.run(importId, propertyName, propertyValue, asOf);
-                }
-
-                if (!accountName && !propertyName && amount === null && propertyValue === null) {
-                    insertIssue.run(importId, 'unmapped_row', `Could not classify row from sheet "${sheetName}"`, index + 2);
-                }
             });
+
+            db.prepare('UPDATE imports SET row_count = ? WHERE id = ?').run(rowCount, importId);
+            return importId;
         });
 
-        db.prepare('UPDATE imports SET row_count = ? WHERE id = ?').run(rowCount, importId);
-        fs.unlinkSync(req.file.path);
-        res.redirect(`/imports/${importId}`);
-    } catch (err) {
-        console.error(err);
-        try {
-            db.prepare('DELETE FROM import_issues WHERE import_id = ?').run(importId);
-            db.prepare('DELETE FROM transactions WHERE import_id = ?').run(importId);
-            db.prepare('DELETE FROM property_values WHERE import_id = ?').run(importId);
-            db.prepare('DELETE FROM account_snapshots WHERE import_id = ?').run(importId);
-            db.prepare('DELETE FROM imports WHERE id = ?').run(importId);
-        } catch (cleanupErr) {
-            console.error(cleanupErr);
-        }
+        const importId = runImport();
+
         try {
             fs.unlinkSync(req.file.path);
         } catch (_) { }
-        res.status(500).send('Import failed.');
+
+        return res.redirect(`/imports/${importId}`);
+    } catch (err) {
+        console.error(err);
+
+        try {
+            fs.unlinkSync(req.file.path);
+        } catch (_) { }
+
+        return res.status(500).send('Import failed.');
     }
 });
 
 app.get('/data/imports', (req, res) => {
-    const latestImport = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
-    const stats = {
-        importCount: db.prepare('SELECT COUNT(*) AS count FROM imports').get().count,
-        transactionCount: db.prepare('SELECT COUNT(*) AS count FROM transactions').get().count,
-        accountCount: db.prepare('SELECT COUNT(*) AS count FROM account_snapshots').get().count,
-        propertyValueCount: db.prepare('SELECT COUNT(*) AS count FROM property_values').get().count,
-        issueCount: db.prepare('SELECT COUNT(*) AS count FROM import_issues').get().count
-    };
-    const recentImports = db.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 25').all();
-    res.render('imports', { latestImport, stats, recentImports });
+    res.render('imports', {
+        latestImport: getLatestImport(),
+        recentImports: getRecentImports(25),
+        stats: getStats()
+    });
 });
 
 app.get('/imports/:id', (req, res) => {
@@ -253,6 +303,7 @@ app.get('/imports/:id', (req, res) => {
     }
 
     const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(importId);
+
     if (!imp) {
         return res.status(404).send('Import not found.');
     }
@@ -307,8 +358,6 @@ app.post('/imports/rollback-last', (req, res) => {
         return res.status(404).send('No imports found to roll back.');
     }
 
-    const importId = latest.id;
-
     const rollbackImport = db.transaction((id) => {
         db.prepare('DELETE FROM import_issues WHERE import_id = ?').run(id);
         db.prepare('DELETE FROM transactions WHERE import_id = ?').run(id);
@@ -318,11 +367,11 @@ app.post('/imports/rollback-last', (req, res) => {
     });
 
     try {
-        rollbackImport(importId);
-        res.redirect('/setup');
+        rollbackImport(latest.id);
+        return res.redirect('/setup');
     } catch (err) {
         console.error(err);
-        res.status(500).send('Failed to roll back latest import.');
+        return res.status(500).send('Failed to roll back latest import.');
     }
 });
 
@@ -333,7 +382,8 @@ app.post('/imports/:id/rollback', (req, res) => {
         return res.status(400).send('Invalid import ID.');
     }
 
-    const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(importId);
+    const imp = db.prepare('SELECT id FROM imports WHERE id = ?').get(importId);
+
     if (!imp) {
         return res.status(404).send('Import not found.');
     }
@@ -348,10 +398,10 @@ app.post('/imports/:id/rollback', (req, res) => {
 
     try {
         rollbackImport(importId);
-        res.redirect('/data/imports');
+        return res.redirect('/data/imports');
     } catch (err) {
         console.error(err);
-        res.status(500).send('Failed to roll back import.');
+        return res.status(500).send('Failed to roll back import.');
     }
 });
 
@@ -364,6 +414,5 @@ app.get('/sales/new', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT}`);
-});
+    console.log(`Financial importer running on http://localhost:${PORT}/`);
 });
