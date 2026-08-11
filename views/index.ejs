@@ -132,7 +132,7 @@
     <a class="btn secondary" href="/setup">Setup</a>
   </div>
 
-  <% if (latestImport) { %>
+  <% if (typeof latestImport !== 'undefined' && latestImport) { %>
     <p class="muted">
       Latest import: <strong><%= latestImport.filename %></strong> ·
       <%= latestImport.imported_at %>
@@ -144,19 +144,19 @@
 
     <div class="stats-grid">
       <div class="stat">
-        <strong><%= stats ? stats.accounts : 0 %></strong>
+        <strong><%= typeof stats !== 'undefined' && stats ? (stats.accounts || stats.accountCount || 0) : 0 %></strong>
         <span>Accounts</span>
       </div>
       <div class="stat">
-        <strong><%= stats ? stats.transactions : 0 %></strong>
+        <strong><%= typeof stats !== 'undefined' && stats ? (stats.transactions || stats.transactionCount || 0) : 0 %></strong>
         <span>Transactions</span>
       </div>
       <div class="stat">
-        <strong><%= stats ? stats.properties : 0 %></strong>
+        <strong><%= typeof stats !== 'undefined' && stats ? (stats.properties || stats.propertyValueCount || 0) : 0 %></strong>
         <span>Properties</span>
       </div>
       <div class="stat">
-        <strong><%= stats ? stats.issues : 0 %></strong>
+        <strong><%= typeof stats !== 'undefined' && stats ? (stats.issues || stats.issueCount || 0) : 0 %></strong>
         <span>Latest import issues</span>
       </div>
     </div>
@@ -165,7 +165,7 @@
   <div class="panel">
     <h2>This month by property</h2>
 
-    <% if (monthlyCashFlow && monthlyCashFlow.length) { %>
+    <% if (typeof monthlyCashFlow !== 'undefined' && monthlyCashFlow && monthlyCashFlow.length) { %>
       <div class="table-wrap">
         <table>
           <thead>
@@ -179,15 +179,15 @@
           <tbody>
             <% monthlyCashFlow.forEach(function(row) { %>
               <tr>
-                <td><%= row.property_name || '—' %></td>
+                <td><%= row.property_name || row.address || '—' %></td>
                 <td class="amount-positive">
                   <%= Number(row.income_total || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
                 </td>
                 <td class="amount-negative">
                   <%= Number(row.expense_total || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
                 </td>
-                <td class="<%= Number(row.net_total || 0) < 0 ? 'amount-negative' : 'amount-positive' %>">
-                  <%= Number(row.net_total || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                <td class="<%= Number(row.net_total || row.net_amount || 0) < 0 ? 'amount-negative' : 'amount-positive' %>">
+                  <%= Number(row.net_total || row.net_amount || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
                 </td>
               </tr>
             <% }) %>
@@ -202,7 +202,7 @@
   <div class="panel">
     <h2>Recent transactions</h2>
 
-    <% if (recentTransactions && recentTransactions.length) { %>
+    <% if (typeof recentTransactions !== 'undefined' && recentTransactions && recentTransactions.length) { %>
       <div class="table-wrap">
         <table>
           <thead>
@@ -218,9 +218,9 @@
             <% recentTransactions.forEach(function(row) { %>
               <tr>
                 <td><%= row.txn_date || '' %></td>
-                <td><%= row.property_name || '—' %></td>
-                <td><%= row.reason || '' %></td>
-                <td><%= row.source_category || '' %></td>
+                <td><%= row.property_name || row.address || '—' %></td>
+                <td><%= row.reason || row.description || '' %></td>
+                <td><%= row.source_category || row.category || '' %></td>
                 <td class="<%= Number(row.amount || 0) < 0 ? 'amount-negative' : 'amount-positive' %>">
                   <%= Number(row.amount || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
                 </td>
@@ -237,7 +237,7 @@
   <div class="panel">
     <h2>Latest property values</h2>
 
-    <% if (latestPropertyValues && latestPropertyValues.length) { %>
+    <% if (typeof latestPropertyValues !== 'undefined' && latestPropertyValues && latestPropertyValues.length) { %>
       <div class="table-wrap">
         <table>
           <thead>
@@ -251,18 +251,18 @@
           <tbody>
             <% latestPropertyValues.forEach(function(row) { %>
               <tr>
-                <td><%= row.address || '' %></td>
+                <td><%= row.address || row.property_name || '' %></td>
                 <td>
-                  <%= row.estimate == null
+                  <%= row.estimate == null && row.property_value == null
                     ? '—'
-                    : Number(row.estimate).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                    : Number(row.estimate != null ? row.estimate : row.property_value).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
                 </td>
                 <td class="<%= Number(row.profit_loss || 0) < 0 ? 'amount-negative' : 'amount-positive' %>">
                   <%= row.profit_loss == null
                     ? '—'
                     : Number(row.profit_loss).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
                 </td>
-                <td><%= row.snapshot_date || '' %></td>
+                <td><%= row.snapshot_date || row.as_of || '' %></td>
               </tr>
             <% }) %>
           </tbody>
