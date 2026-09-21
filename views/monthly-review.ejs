@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monthly review</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2rem;
+      color: #1f2937;
+      background: #ffffff;
+    }
+
+    h1, h2 {
+      margin-bottom: 0.5rem;
+    }
+
+    p {
+      color: #4b5563;
+      max-width: 950px;
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin: 1rem 0 2rem;
+    }
+
+    .btn, button {
+      display: inline-block;
+      padding: 0.8rem 1rem;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      background: #111827;
+      color: #fff;
+      text-decoration: none;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+
+    .btn.secondary {
+      background: #fff;
+      color: #111827;
+    }
+
+    .panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+      max-width: 1100px;
+    }
+
+    .filter-row {
+      display: flex;
+      gap: 0.75rem;
+      align-items: end;
+      flex-wrap: wrap;
+      margin-top: 1rem;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+      color: #111827;
+    }
+
+    select {
+      padding: 0.65rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      min-width: 180px;
+      font-size: 0.95rem;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      margin-top: 1rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.5rem;
+    }
+
+    th, td {
+      border: 1px solid #e5e7eb;
+      padding: 0.75rem;
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+
+    th {
+      background: #f3f4f6;
+    }
+
+    a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+
+    .muted {
+      color: #6b7280;
+    }
+
+    .amount-negative {
+      color: #b91c1c;
+      font-weight: 600;
+    }
+
+    .amount-positive {
+      color: #047857;
+      font-weight: 600;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.5rem;
+      border-radius: 999px;
+      background: #fef3c7;
+      color: #92400e;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <h1>Monthly review</h1>
+  <p>
+    Review monthly cash flow by property and see likely recurring expenses that are missing
+    from the selected month. A recurring item is flagged when it appeared in at least
+    2 of the prior 3 months and is absent this month.
+  </p>
+
+  <div class="top-actions">
+    <a class="btn secondary" href="/">Dashboard</a>
+    <a class="btn secondary" href="/data/imports">Imports</a>
+    <a class="btn secondary" href="/setup">Setup</a>
+  </div>
+
+  <div class="panel">
+    <h2>Month selection</h2>
+
+    <form method="get" action="/monthly-review" class="filter-row">
+      <div>
+        <label for="month">Review month</label>
+        <select name="month" id="month">
+          <% if (availableMonths && availableMonths.length) { %>
+            <% availableMonths.forEach(function(month) { %>
+              <option value="<%= month %>" <%= month === selectedMonth ? 'selected' : '' %>>
+                <%= month %>
+              </option>
+            <% }) %>
+          <% } %>
+        </select>
+      </div>
+      <div>
+        <button type="submit">Load review</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Cash flow by property</h2>
+
+    <% if (monthlyCashFlow && monthlyCashFlow.length) { %>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Property</th>
+              <th>Income</th>
+              <th>Expenses</th>
+              <th>Net</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% monthlyCashFlow.forEach(function(row) { %>
+              <tr>
+                <td><%= row.property_name || '—' %></td>
+                <td class="amount-positive">
+                  <%= Number(row.income_total || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                </td>
+                <td class="amount-negative">
+                  <%= Number(row.expense_total || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                </td>
+                <td class="<%= Number(row.net_total || 0) < 0 ? 'amount-negative' : 'amount-positive' %>">
+                  <%= Number(row.net_total || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p class="muted">No transactions found for the selected month.</p>
+    <% } %>
+  </div>
+
+  <div class="panel">
+    <h2>Missing recurring expenses</h2>
+    <p class="muted">
+      These are likely regular expenses that appeared in at least 2 of the prior 3 months
+      but were not found in <strong><%= selectedMonth || 'the selected month' %></strong>.
+    </p>
+
+    <% if (missingRecurringExpenses && missingRecurringExpenses.length) { %>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Property</th>
+              <th>Reason</th>
+              <th>Seen in prior months</th>
+              <th>Typical amount</th>
+              <th>Last seen date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% missingRecurringExpenses.forEach(function(row) { %>
+              <tr>
+                <td><%= row.property_name || '—' %></td>
+                <td>
+                  <%= row.reason || '' %>
+                  <div style="margin-top:0.35rem;">
+                    <span class="badge">Missing this month</span>
+                  </div>
+                </td>
+                <td><%= row.months_present || 0 %> of prior 3 months</td>
+                <td class="amount-negative">
+                  <%= row.typical_amount == null
+                    ? '—'
+                    : Number(row.typical_amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
+                </td>
+                <td><%= row.last_seen_date || '' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <p class="muted">No missing recurring expenses were detected for this month.</p>
+    <% } %>
+  </div>
+</body>
+</html>
