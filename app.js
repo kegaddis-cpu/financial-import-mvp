@@ -41,6 +41,32 @@ CREATE TABLE IF NOT EXISTS imports (
   notes TEXT
 );
 
+const transactionColumns = db.prepare(`PRAGMA table_info(transactions)`).all().map(col => col.name);
+
+if (!transactionColumns.includes('reason')) {
+  db.exec(`ALTER TABLE transactions ADD COLUMN reason TEXT`);
+}
+
+if (!transactionColumns.includes('source_category')) {
+  db.exec(`ALTER TABLE transactions ADD COLUMN source_category TEXT`);
+}
+
+if (!transactionColumns.includes('income_amount')) {
+  db.exec(`ALTER TABLE transactions ADD COLUMN income_amount REAL`);
+}
+
+if (!transactionColumns.includes('expense_amount')) {
+  db.exec(`ALTER TABLE transactions ADD COLUMN expense_amount REAL`);
+}
+
+if (!transactionColumns.includes('year_tag')) {
+  db.exec(`ALTER TABLE transactions ADD COLUMN year_tag INTEGER`);
+}
+
+if (!transactionColumns.includes('source_sheet')) {
+  db.exec(`ALTER TABLE transactions ADD COLUMN source_sheet TEXT`);
+}
+
 CREATE TABLE IF NOT EXISTS account_snapshots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   import_id INTEGER NOT NULL,
