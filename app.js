@@ -41,32 +41,6 @@ CREATE TABLE IF NOT EXISTS imports (
   notes TEXT
 );
 
-const transactionColumns = db.prepare(`PRAGMA table_info(transactions)`).all().map(col => col.name);
-
-if (!transactionColumns.includes('reason')) {
-  db.exec(`ALTER TABLE transactions ADD COLUMN reason TEXT`);
-}
-
-if (!transactionColumns.includes('source_category')) {
-  db.exec(`ALTER TABLE transactions ADD COLUMN source_category TEXT`);
-}
-
-if (!transactionColumns.includes('income_amount')) {
-  db.exec(`ALTER TABLE transactions ADD COLUMN income_amount REAL`);
-}
-
-if (!transactionColumns.includes('expense_amount')) {
-  db.exec(`ALTER TABLE transactions ADD COLUMN expense_amount REAL`);
-}
-
-if (!transactionColumns.includes('year_tag')) {
-  db.exec(`ALTER TABLE transactions ADD COLUMN year_tag INTEGER`);
-}
-
-if (!transactionColumns.includes('source_sheet')) {
-  db.exec(`ALTER TABLE transactions ADD COLUMN source_sheet TEXT`);
-}
-
 CREATE TABLE IF NOT EXISTS account_snapshots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   import_id INTEGER NOT NULL,
@@ -112,30 +86,30 @@ CREATE TABLE IF NOT EXISTS import_issues (
 );
 `);
 
-const transactionColumns = db.prepare(`PRAGMA table_info(transactions)`).all().map(col => col.name);
+const transactionColumns = db.prepare('PRAGMA table_info(transactions)').all().map(col => col.name);
 
 if (!transactionColumns.includes('reason')) {
-  db.exec(`ALTER TABLE transactions ADD COLUMN reason TEXT`);
+  db.exec('ALTER TABLE transactions ADD COLUMN reason TEXT');
 }
 
 if (!transactionColumns.includes('source_category')) {
-  db.exec(`ALTER TABLE transactions ADD COLUMN source_category TEXT`);
+  db.exec('ALTER TABLE transactions ADD COLUMN source_category TEXT');
 }
 
 if (!transactionColumns.includes('income_amount')) {
-  db.exec(`ALTER TABLE transactions ADD COLUMN income_amount REAL`);
+  db.exec('ALTER TABLE transactions ADD COLUMN income_amount REAL');
 }
 
 if (!transactionColumns.includes('expense_amount')) {
-  db.exec(`ALTER TABLE transactions ADD COLUMN expense_amount REAL`);
+  db.exec('ALTER TABLE transactions ADD COLUMN expense_amount REAL');
 }
 
 if (!transactionColumns.includes('year_tag')) {
-  db.exec(`ALTER TABLE transactions ADD COLUMN year_tag INTEGER`);
+  db.exec('ALTER TABLE transactions ADD COLUMN year_tag INTEGER');
 }
 
 if (!transactionColumns.includes('source_sheet')) {
-  db.exec(`ALTER TABLE transactions ADD COLUMN source_sheet TEXT`);
+  db.exec('ALTER TABLE transactions ADD COLUMN source_sheet TEXT');
 }
 
 function toNumber(value) {
@@ -500,9 +474,9 @@ app.post('/setup/import', upload.single('workbook'), (req, res) => {
       VALUES (?, ?, ?, ?, ?)
     `);
 
-    const transactionColumns = db.prepare(`PRAGMA table_info(transactions)`).all().map(col => col.name);
-    const hasLegacyTxnSchema = transactionColumns.includes('reason') && transactionColumns.includes('source_category');
-    const hasNewTxnSchema = transactionColumns.includes('description') && transactionColumns.includes('category');
+    const currentTxnColumns = db.prepare('PRAGMA table_info(transactions)').all().map(col => col.name);
+    const hasLegacyTxnSchema = currentTxnColumns.includes('reason') && currentTxnColumns.includes('source_category');
+    const hasNewTxnSchema = currentTxnColumns.includes('description') && currentTxnColumns.includes('category');
 
     const insertAccount = db.prepare(`
       INSERT INTO account_snapshots (import_id, account_name, balance, as_of)
@@ -663,8 +637,8 @@ app.get('/imports/:id', (req, res) => {
       ORDER BY account_name, as_of
     `).all(importId);
 
-    const transactionColumns = db.prepare(`PRAGMA table_info(transactions)`).all().map(col => col.name);
-    const hasLegacyTxnSchema = transactionColumns.includes('reason') && transactionColumns.includes('source_category');
+    const currentTxnColumns = db.prepare('PRAGMA table_info(transactions)').all().map(col => col.name);
+    const hasLegacyTxnSchema = currentTxnColumns.includes('reason') && currentTxnColumns.includes('source_category');
 
     const properties = hasLegacyTxnSchema
       ? db.prepare(`
