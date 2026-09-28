@@ -81,13 +81,10 @@
       <h2>Upload workbook</h2>
       <p class="muted">Choose your Excel workbook to seed or refresh your financial data.</p>
 
-      <form action="/setup/import" method="post" enctype="multipart/form-data">
-        <input type="file" name="financialFile" accept=".xlsx,.xls,.xlsm" required />
-        <div class="actions">
-          <button class="btn btn-primary" type="submit">Upload workbook</button>
-          <a class="btn" href="/data/imports">View import history</a>
-        </div>
-      </form>
+     <form action="/setup/import" method="post" enctype="multipart/form-data">
+     <input type="file" name="workbook" accept=".xlsx,.xls" required>
+     <button type="submit">Upload</button>
+     </form>
 
       <div class="danger-zone">
         <h2>Rollback</h2>
