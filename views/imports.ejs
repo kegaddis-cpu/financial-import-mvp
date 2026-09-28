@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Imports</title>
+</head>
+<body>
+  <h1>Imports</h1>
+  <ul>
+    <% recentImports.forEach(function(imp) { %>
+      <li>
+        <a href="/imports/<%= imp.id %>">
+          <%= imp.filename %>
+        </a>
+      </li>
+    <% }) %>
+  </ul>
+</body>
+</html>
