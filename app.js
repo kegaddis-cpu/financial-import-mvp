@@ -1,8 +1,3 @@
-initDb()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Financial importer running on http://localhost:${PORT}/`);
-    });
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
