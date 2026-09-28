@@ -12,6 +12,9 @@ const uploadsDir = path.join(__dirname, 'uploads');
 const publicDir = path.join(__dirname, 'public');
 const viewsDir = path.join(__dirname, 'views');
 
+
+console.log('DATABASE_URL present:', !!process.env.DATABASE_URL, process.env.DATABASE_URL?.slice(0, 20));
+
 fs.mkdirSync(uploadsDir, { recursive: true });
 fs.mkdirSync(publicDir, { recursive: true });
 fs.mkdirSync(viewsDir, { recursive: true });
