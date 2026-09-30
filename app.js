@@ -678,7 +678,7 @@ app.post('/imports/:id/rollback', async (req, res) => {
 
     if (!Number.isInteger(importId) || importId <= 0) {
       client.release();
-      return res.status(400).send('Invalid import ID.');
+      return res.stat  us(400).send('Invalid import ID.');
     }
 
     const imp = (await client.query('SELECT id FROM imports WHERE id = $1', [importId])).rows[0];
@@ -700,6 +700,41 @@ app.post('/imports/:id/rollback', async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('POST /imports/:id/rollback failed:', err);
+    return res.status(500).send(`Rollback failed: ${err.message}`);
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/imports/rollback-last', async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const latest = (await client.query(`
+      SELECT id
+      FROM imports
+      ORDER BY id DESC
+      LIMIT 1
+    `)).rows[0];
+
+    if (!latest) {
+      return res.status(404).send('No imports found to roll back.');
+    }
+
+    await client.query('BEGIN');
+
+    await client.query('DELETE FROM import_issues WHERE import_id = $1', [latest.id]);
+    await client.query('DELETE FROM transactions WHERE import_id = $1', [latest.id]);
+    await client.query('DELETE FROM property_values WHERE import_id = $1', [latest.id]);
+    await client.query('DELETE FROM account_snapshots WHERE import_id = $1', [latest.id]);
+    await client.query('DELETE FROM imports WHERE id = $1', [latest.id]);
+
+    await client.query('COMMIT');
+
+    return res.redirect('/data/imports');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('POST /imports/rollback-last failed:', err);
     return res.status(500).send(`Rollback failed: ${err.message}`);
   } finally {
     client.release();
