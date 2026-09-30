@@ -34,7 +34,12 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(publicDir));
 
-const upload = multer({ dest: uploadsDir });
+const upload = multer({
+  dest: uploadsDir,
+  limits: {
+    fileSize: 20 * 1024 * 1024
+  }
+});
 
 async function query(sql, params = []) {
   return pool.query(sql, params);
@@ -42,6 +47,7 @@ async function query(sql, params = []) {
 
 function removeUploadedFile(filePath) {
   if (!filePath) return;
+
   try {
     fs.unlinkSync(filePath);
   } catch (_) {}
@@ -116,27 +122,30 @@ async function initDb() {
 
 function toNumber(value) {
   if (value == null || value === '') return null;
-  if (typeof value === 'number') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
 
   const raw = String(value).trim();
   if (!raw) return null;
 
   const negativeByParens = raw.startsWith('(') && raw.endsWith(')');
   const cleaned = raw.replace(/[$,()]/g, '').trim();
+
   if (!cleaned) return null;
 
   const num = Number(cleaned);
-  if (Number.isNaN(num)) return null;
+  if (!Number.isFinite(num)) return null;
 
   return negativeByParens ? -Math.abs(num) : num;
 }
 
 function normalizeDate(value) {
-  if (!value) return null;
+  if (value == null || value === '') return null;
 
   if (typeof value === 'number') {
     const parsed = XLSX.SSF.parse_date_code(value);
+
     if (!parsed) return null;
+
     return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
   }
 
@@ -146,38 +155,23 @@ function normalizeDate(value) {
   const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (iso) return str;
 
-  const us = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-  if (us) {
-    let [, m, d, y] = us;
-    if (y.length === 2) y = `20${y}`;
-    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-  }
+  const usDate = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
 
-  return str;
-}
+  if (usDate) {
+    let [, month, day, year] = usDate;
 
-function pick(obj, keys) {
-  for (const key of keys) {
-    if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
-      return obj[key];
+    if (year.length === 2) {
+      year = `20${year}`;
     }
+
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
+
   return null;
 }
 
 function normalizeSheetName(sheetName) {
-  return String(sheetName || '').trim().toLowerCase();
-}
-
-function hasAnyMeaningfulValue(row) {
-  const values = Object.values(row || {});
-  if (!values.length) return false;
-
-  return values.some((value) => {
-    if (value == null) return false;
-    if (typeof value === 'string') return value.trim() !== '';
-    return true;
-  });
+  return String(sheetName || '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 function cleanCell(value) {
@@ -190,46 +184,58 @@ function cleanRowArray(row) {
 }
 
 function rowHasMeaningfulCell(row) {
-  return row.some((cell) => cell !== '');
+  return Array.isArray(row) && row.some((cell) => cell !== '');
+}
+
+function firstNonEmptyCell(row) {
+  return row.find((cell) => cell !== '') || null;
 }
 
 function findFirstText(row) {
   for (const cell of row) {
     if (!cell) continue;
-    if (toNumber(cell) === null && !normalizeDate(cell)?.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      return cell;
-    }
+    if (toNumber(cell) !== null) continue;
+    if (normalizeDate(cell)) continue;
+    return cell;
   }
+
   return null;
 }
 
 function findLastNumber(row) {
-  for (let i = row.length - 1; i >= 0; i--) {
-    const num = toNumber(row[i]);
-    if (num !== null) return num;
+  for (let index = row.length - 1; index >= 0; index--) {
+    const number = toNumber(row[index]);
+
+    if (number !== null) {
+      return number;
+    }
   }
+
   return null;
 }
 
 function findDateInRow(row) {
   for (const cell of row) {
-    const normalized = normalizeDate(cell);
-    if (!normalized) continue;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
-    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(String(cell).trim())) return normalized;
+    const date = normalizeDate(cell);
+
+    if (date) {
+      return date;
+    }
   }
+
   return null;
 }
 
-function shouldSkipArrayRow(row) {
-  if (!rowHasMeaningfulCell(row)) return true;
+function isHeaderOrSectionRow(row) {
+  const values = row
+    .filter(Boolean)
+    .map((value) => String(value).trim());
 
-  const values = row.filter(Boolean).map((v) => v.toLowerCase());
   if (!values.length) return true;
 
-  const joined = values.join(' ');
+  const joined = values.join(' ').toLowerCase();
 
-  const genericNoisePatterns = [
+  const skipTerms = [
     'total',
     'totals',
     'subtotal',
@@ -240,10 +246,52 @@ function shouldSkipArrayRow(row) {
     'account summary',
     'property summary',
     'notes',
-    'memo'
+    'memo',
+    'revenue',
+    'revenues',
+    'expense',
+    'expenses',
+    'income',
+    'date',
+    'description',
+    'category',
+    'amount',
+    'property',
+    'property name',
+    'account',
+    'account name',
+    'balance',
+    'value',
+    'property value'
   ];
 
-  if (values.length === 1 && genericNoisePatterns.includes(joined)) {
+  if (values.length === 1 && skipTerms.includes(joined)) {
+    return true;
+  }
+
+  if (
+    values.length <= 4 &&
+    values.every((value) => {
+      const lower = value.toLowerCase();
+
+      return [
+        'date',
+        'description',
+        'category',
+        'amount',
+        'income',
+        'expense',
+        'revenue',
+        'property',
+        'property name',
+        'account',
+        'account name',
+        'balance',
+        'value',
+        'property value'
+      ].includes(lower);
+    })
+  ) {
     return true;
   }
 
@@ -253,49 +301,116 @@ function shouldSkipArrayRow(row) {
 function detectSheetType(sheetName) {
   const normalized = normalizeSheetName(sheetName);
 
-  if (normalized.includes('revenue') || normalized.includes('expense')) return 'revenue_expenses';
-  if (normalized.includes('account')) return 'accounts';
-  if (normalized.includes('property') && normalized.includes('value')) return 'property_values';
-  if (normalized.includes('payment')) return 'payments';
-  if (normalized.includes('cleanup') || normalized.includes('note')) return 'ignore';
+  if (normalized.includes('cleanup') || normalized.includes('note')) {
+    return 'ignore';
+  }
+
+  if (normalized.includes('account')) {
+    return 'accounts';
+  }
+
+  if (normalized.includes('property') && normalized.includes('value')) {
+    return 'property_values';
+  }
+
+  if (normalized.includes('revenue') || normalized.includes('expense')) {
+    return 'revenue_expenses';
+  }
+
+  if (normalized.includes('payment')) {
+    return 'payments';
+  }
+
   return 'unknown';
 }
 
 function inferDirectionAndBuckets(amount, currentSection) {
   if (amount == null) {
-    return { direction: null, income_amount: null, expense_amount: null };
+    return {
+      amount: null,
+      direction: null,
+      incomeAmount: null,
+      expenseAmount: null
+    };
   }
 
   if (currentSection === 'revenue') {
     return {
+      amount: Math.abs(amount),
       direction: 'inflow',
-      income_amount: Math.abs(amount),
-      expense_amount: null
+      incomeAmount: Math.abs(amount),
+      expenseAmount: null
     };
   }
 
   if (currentSection === 'expense') {
     return {
+      amount: -Math.abs(amount),
       direction: 'outflow',
-      income_amount: null,
-      expense_amount: Math.abs(amount),
-      amount: -Math.abs(amount)
+      incomeAmount: null,
+      expenseAmount: Math.abs(amount)
     };
   }
 
   if (amount < 0) {
     return {
+      amount,
       direction: 'outflow',
-      income_amount: null,
-      expense_amount: Math.abs(amount)
+      incomeAmount: null,
+      expenseAmount: Math.abs(amount)
     };
   }
 
   return {
+    amount,
     direction: 'inflow',
-    income_amount: Math.abs(amount),
-    expense_amount: null
+    incomeAmount: Math.abs(amount),
+    expenseAmount: null
   };
+}
+
+function looksLikeSectionHeading(row) {
+  const values = row.filter(Boolean);
+
+  if (values.length !== 1) return false;
+
+  const normalized = values[0].toLowerCase();
+
+  return [
+    'revenue',
+    'revenues',
+    'income',
+    'expenses',
+    'expense',
+    'operating expenses',
+    'other expenses'
+  ].includes(normalized);
+}
+
+function isLikelyPropertyHeading(row) {
+  const values = row.filter(Boolean);
+
+  if (values.length !== 1) return false;
+
+  const value = values[0];
+
+  if (!value) return false;
+  if (toNumber(value) !== null) return false;
+  if (normalizeDate(value)) return false;
+
+  const lower = value.toLowerCase();
+
+  return ![
+    'revenue',
+    'revenues',
+    'income',
+    'expenses',
+    'expense',
+    'operating expenses',
+    'other expenses',
+    'accounts',
+    'property values'
+  ].includes(lower);
 }
 
 async function insertIssue(importId, issueType, message, rowNumber) {
@@ -306,11 +421,30 @@ async function insertIssue(importId, issueType, message, rowNumber) {
 }
 
 async function getStats() {
-  const importsCount = (await query('SELECT COUNT(*)::int AS count FROM imports')).rows[0].count;
-  const transactionsCount = (await query('SELECT COUNT(*)::int AS count FROM transactions')).rows[0].count;
-  const accountCount = (await query('SELECT COUNT(*)::int AS count FROM account_snapshots')).rows[0].count;
-  const propertyValueCount = (await query('SELECT COUNT(*)::int AS count FROM property_values')).rows[0].count;
-  const issueCount = (await query('SELECT COUNT(*)::int AS count FROM import_issues')).rows[0].count;
+  const importsCount = (await query(`
+    SELECT COUNT(*)::int AS count
+    FROM imports
+  `)).rows[0].count;
+
+  const transactionsCount = (await query(`
+    SELECT COUNT(*)::int AS count
+    FROM transactions
+  `)).rows[0].count;
+
+  const accountCount = (await query(`
+    SELECT COUNT(*)::int AS count
+    FROM account_snapshots
+  `)).rows[0].count;
+
+  const propertyValueCount = (await query(`
+    SELECT COUNT(*)::int AS count
+    FROM property_values
+  `)).rows[0].count;
+
+  const issueCount = (await query(`
+    SELECT COUNT(*)::int AS count
+    FROM import_issues
+  `)).rows[0].count;
 
   return {
     importCount: importsCount,
@@ -326,7 +460,13 @@ async function getStats() {
 }
 
 async function getLatestImport() {
-  const result = await query('SELECT * FROM imports ORDER BY id DESC LIMIT 1');
+  const result = await query(`
+    SELECT *
+    FROM imports
+    ORDER BY id DESC
+    LIMIT 1
+  `);
+
   return result.rows[0] || null;
 }
 
@@ -337,6 +477,7 @@ async function getRecentImports(limit = 10) {
     ORDER BY id DESC
     LIMIT $1
   `, [limit]);
+
   return result.rows;
 }
 
@@ -353,18 +494,44 @@ async function getLatestImportStats() {
     };
   }
 
+  const accounts = (await query(`
+    SELECT COUNT(*)::int AS count
+    FROM account_snapshots
+    WHERE import_id = $1
+  `, [latest.id])).rows[0].count;
+
+  const transactions = (await query(`
+    SELECT COUNT(*)::int AS count
+    FROM transactions
+    WHERE import_id = $1
+  `, [latest.id])).rows[0].count;
+
+  const properties = (await query(`
+    SELECT COUNT(DISTINCT property_name)::int AS count
+    FROM transactions
+    WHERE import_id = $1
+      AND property_name IS NOT NULL
+      AND TRIM(property_name) <> ''
+  `, [latest.id])).rows[0].count;
+
+  const propertyValues = (await query(`
+    SELECT COUNT(*)::int AS count
+    FROM property_values
+    WHERE import_id = $1
+  `, [latest.id])).rows[0].count;
+
+  const issues = (await query(`
+    SELECT COUNT(*)::int AS count
+    FROM import_issues
+    WHERE import_id = $1
+  `, [latest.id])).rows[0].count;
+
   return {
-    accounts: (await query('SELECT COUNT(*)::int AS count FROM account_snapshots WHERE import_id = $1', [latest.id])).rows[0].count,
-    transactions: (await query('SELECT COUNT(*)::int AS count FROM transactions WHERE import_id = $1', [latest.id])).rows[0].count,
-    properties: (await query(`
-      SELECT COUNT(DISTINCT property_name)::int AS count
-      FROM transactions
-      WHERE import_id = $1
-        AND property_name IS NOT NULL
-        AND TRIM(property_name) <> ''
-    `, [latest.id])).rows[0].count,
-    propertyValues: (await query('SELECT COUNT(*)::int AS count FROM property_values WHERE import_id = $1', [latest.id])).rows[0].count,
-    issues: (await query('SELECT COUNT(*)::int AS count FROM import_issues WHERE import_id = $1', [latest.id])).rows[0].count
+    accounts,
+    transactions,
+    properties,
+    propertyValues,
+    issues
   };
 }
 
@@ -376,13 +543,16 @@ async function getAvailableMonths() {
       AND length(txn_date) >= 7
     ORDER BY month DESC
   `);
+
   return result.rows.map((row) => row.month);
 }
 
 async function getSelectedMonth(requestedMonth) {
   const months = await getAvailableMonths();
+
   if (!months.length) return null;
   if (requestedMonth && months.includes(requestedMonth)) return requestedMonth;
+
   return months[0];
 }
 
@@ -448,9 +618,18 @@ async function getMissingRecurringExpenses(selectedMonth) {
     WITH months AS (
       SELECT
         $1::text AS selected_month,
-        to_char((to_date($1 || '-01', 'YYYY-MM-DD') - interval '1 month'), 'YYYY-MM') AS prev1,
-        to_char((to_date($1 || '-01', 'YYYY-MM-DD') - interval '2 month'), 'YYYY-MM') AS prev2,
-        to_char((to_date($1 || '-01', 'YYYY-MM-DD') - interval '3 month'), 'YYYY-MM') AS prev3
+        to_char(
+          to_date($1 || '-01', 'YYYY-MM-DD') - interval '1 month',
+          'YYYY-MM'
+        ) AS prev1,
+        to_char(
+          to_date($1 || '-01', 'YYYY-MM-DD') - interval '2 month',
+          'YYYY-MM'
+        ) AS prev2,
+        to_char(
+          to_date($1 || '-01', 'YYYY-MM-DD') - interval '3 month',
+          'YYYY-MM'
+        ) AS prev3
     ),
     prior_dedup AS (
       SELECT DISTINCT
@@ -466,7 +645,14 @@ async function getMissingRecurringExpenses(selectedMonth) {
         AND t.property_name IS NOT NULL
         AND TRIM(t.property_name) <> ''
         AND COALESCE(t.reason, t.description, '') <> ''
-        AND LOWER(TRIM(t.property_name)) NOT IN ('charity', 'car', 'insurance', 'ethan', 'chlo�', 'chloe')
+        AND LOWER(TRIM(t.property_name)) NOT IN (
+          'charity',
+          'car',
+          'insurance',
+          'ethan',
+          'chlo�',
+          'chloe'
+        )
     ),
     recurring_candidates AS (
       SELECT
@@ -502,7 +688,9 @@ async function getMissingRecurringExpenses(selectedMonth) {
         AND property_name IS NOT NULL
         AND TRIM(property_name) <> ''
         AND COALESCE(reason, description, '') <> ''
-      GROUP BY TRIM(COALESCE(property_name, '')), LOWER(TRIM(COALESCE(reason, description, '')))
+      GROUP BY
+        TRIM(COALESCE(property_name, '')),
+        LOWER(TRIM(COALESCE(reason, description, '')))
     )
     SELECT
       rc.property_name,
@@ -527,24 +715,8 @@ async function getMissingRecurringExpenses(selectedMonth) {
 app.use((req, res, next) => {
   res.locals.latestImport = null;
   res.locals.recentImports = [];
-  res.locals.stats = {
-    importCount: 0,
-    transactionCount: 0,
-    accountCount: 0,
-    propertyValueCount: 0,
-    issueCount: 0,
-    accounts: 0,
-    transactions: 0,
-    properties: 0,
-    issues: 0
-  };
-  res.locals.latestImportStats = {
-    accounts: 0,
-    transactions: 0,
-    properties: 0,
-    propertyValues: 0,
-    issues: 0
-  };
+  res.locals.stats = {};
+  res.locals.latestImportStats = {};
   res.locals.monthlyCashFlow = [];
   res.locals.accounts = [];
   res.locals.properties = [];
@@ -578,6 +750,7 @@ app.use((req, res, next) => {
 app.get('/', async (req, res) => {
   try {
     const selectedMonth = await getSelectedMonth(req.query.month);
+
     res.render('index', {
       latestImport: await getLatestImport(),
       recentImports: await getRecentImports(10),
@@ -616,9 +789,7 @@ app.get('/monthly-review', async (req, res) => {
 app.get('/setup', async (req, res) => {
   try {
     const latestImport = await getLatestImport();
-    const stats = await getStats();
-    const latestImportStats = await getLatestImportStats();
-    const recentImports = await getRecentImports(10);
+
     const issues = latestImport
       ? (await query(`
           SELECT issue_type, message, row_number
@@ -630,9 +801,9 @@ app.get('/setup', async (req, res) => {
 
     res.render('setup', {
       latestImport,
-      stats,
-      latestImportStats,
-      recentImports,
+      stats: await getStats(),
+      latestImportStats: await getLatestImportStats(),
+      recentImports: await getRecentImports(10),
       issues
     });
   } catch (err) {
@@ -641,42 +812,64 @@ app.get('/setup', async (req, res) => {
   }
 });
 
-app.post('/setup/import', upload.single('spreadsheet'), async (req, res) => {
+app.post('/setup/import', (req, res, next) => {
+  upload.single('workbook')(req, res, (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        return res.status(400).send(`Upload error: ${err.message}`);
+      }
+
+      return next(err);
+    }
+
+    return next();
+  });
+}, async (req, res) => {
   if (!req.file) {
-    return res.status(400).send('No file uploaded');
+    return res.status(400).send('No workbook file uploaded');
   }
 
   let importId = null;
   let rowCount = 0;
 
   try {
-    const workbook = XLSX.readFile(req.file.path, { cellDates: false });
+    const workbook = XLSX.readFile(req.file.path, {
+      cellDates: false
+    });
+
     const importResult = await query(`
-      INSERT INTO imports (filename, imported_at, sheet_count, row_count, notes)
+      INSERT INTO imports (
+        filename,
+        imported_at,
+        sheet_count,
+        row_count,
+        notes
+      )
       VALUES ($1, CURRENT_TIMESTAMP, $2, 0, $3)
       RETURNING id
     `, [
       req.file.originalname,
       workbook.SheetNames.length,
-      'Imported with array-based summary parser'
+      'Imported with array-based worksheet parser'
     ]);
 
     importId = importResult.rows[0].id;
 
     for (const sheetName of workbook.SheetNames) {
       const sheetType = detectSheetType(sheetName);
-      const ws = workbook.Sheets[sheetName];
+      const worksheet = workbook.Sheets[sheetName];
 
-      if (!ws) continue;
-      if (sheetType === 'ignore') continue;
+      if (!worksheet || sheetType === 'ignore') {
+        continue;
+      }
 
-      const rows = XLSX.utils.sheet_to_json(ws, {
+      const rows = XLSX.utils.sheet_to_json(worksheet, {
         header: 1,
         raw: false,
         blankrows: false
       })
         .map(cleanRowArray)
-        .filter((row) => rowHasMeaningfulCell(row));
+        .filter(rowHasMeaningfulCell);
 
       let currentSection = null;
       let currentProperty = null;
@@ -684,80 +877,114 @@ app.post('/setup/import', upload.single('spreadsheet'), async (req, res) => {
       for (let index = 0; index < rows.length; index++) {
         const row = rows[index];
         const rowNumber = index + 1;
+        const values = row.filter(Boolean);
+        const joined = values.join(' ').toLowerCase();
 
-        if (shouldSkipArrayRow(row)) continue;
+        if (!values.length || isHeaderOrSectionRow(row)) {
+          if (looksLikeSectionHeading(row)) {
+            if (
+              joined.includes('revenue') ||
+              joined.includes('income')
+            ) {
+              currentSection = 'revenue';
+            }
 
-        const joined = row.filter(Boolean).join(' ').toLowerCase();
-        const firstText = findFirstText(row);
-        const amountRaw = findLastNumber(row);
-        const txnDate = findDateInRow(row);
+            if (
+              joined.includes('expense')
+            ) {
+              currentSection = 'expense';
+            }
+          }
 
-        if (joined.includes('revenue')) {
+          continue;
+        }
+
+        if (joined === 'revenue' || joined === 'revenues' || joined === 'income') {
           currentSection = 'revenue';
           continue;
         }
 
-        if (joined.includes('expense')) {
+        if (
+          joined === 'expense' ||
+          joined === 'expenses' ||
+          joined === 'operating expenses' ||
+          joined === 'other expenses'
+        ) {
           currentSection = 'expense';
           continue;
         }
 
         if (
-          firstText &&
-          !txnDate &&
-          amountRaw === null &&
-          row.filter(Boolean).length === 1 &&
-          !['revenue', 'expenses', 'expense', 'accounts', 'property values'].includes(firstText.toLowerCase())
+          (sheetType === 'revenue_expenses' || sheetType === 'payments') &&
+          isLikelyPropertyHeading(row)
         ) {
-          currentProperty = firstText;
+          currentProperty = firstNonEmptyCell(row);
           continue;
         }
 
-        if (sheetType === 'accounts') {
-          const accountName = firstText;
-          const balance = amountRaw;
+        const firstText = findFirstText(row);
+        const lastNumber = findLastNumber(row);
+        const txnDate = findDateInRow(row);
 
-          if (accountName && balance !== null) {
+        if (sheetType === 'accounts') {
+          if (firstText && lastNumber !== null) {
             await query(`
-              INSERT INTO account_snapshots (import_id, account_name, balance, as_of)
+              INSERT INTO account_snapshots (
+                import_id,
+                account_name,
+                balance,
+                as_of
+              )
               VALUES ($1, $2, $3, $4)
-            `, [importId, accountName, balance, txnDate]);
+            `, [
+              importId,
+              firstText,
+              lastNumber,
+              txnDate
+            ]);
+
             rowCount++;
             continue;
           }
 
-          await insertIssue(importId, 'unmapped_row', `Could not classify row from sheet "${sheetName}"`, rowNumber);
           continue;
         }
 
         if (sheetType === 'property_values') {
           const propertyName = firstText || currentProperty;
-          const propertyValue = amountRaw;
 
-          if (propertyName && propertyValue !== null) {
+          if (propertyName && lastNumber !== null) {
             await query(`
-              INSERT INTO property_values (import_id, property_name, property_value, as_of)
+              INSERT INTO property_values (
+                import_id,
+                property_name,
+                property_value,
+                as_of
+              )
               VALUES ($1, $2, $3, $4)
-            `, [importId, propertyName, propertyValue, txnDate]);
+            `, [
+              importId,
+              propertyName,
+              lastNumber,
+              txnDate
+            ]);
+
             rowCount++;
             continue;
           }
 
-          await insertIssue(importId, 'unmapped_row', `Could not classify row from sheet "${sheetName}"`, rowNumber);
           continue;
         }
 
-        if (sheetType === 'revenue_expenses' || sheetType === 'payments' || sheetType === 'unknown') {
+        if (
+          sheetType === 'revenue_expenses' ||
+          sheetType === 'payments' ||
+          sheetType === 'unknown'
+        ) {
           const description = firstText;
-          let amount = amountRaw;
-          const propertyName = currentProperty;
-          const bucket = inferDirectionAndBuckets(amount, currentSection);
+          const bucket = inferDirectionAndBuckets(lastNumber, currentSection);
 
-          if (bucket.amount != null) {
-            amount = bucket.amount;
-          }
-
-          if ((description || propertyName) && amount !== null) {
+          if (description && bucket.amount !== null) {
             await query(`
               INSERT INTO transactions (
                 import_id,
@@ -775,29 +1002,44 @@ app.post('/setup/import', upload.single('spreadsheet'), async (req, res) => {
                 year_tag,
                 source_sheet
               )
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+              VALUES (
+                $1, $2, $3, $4, $5, $6, $7,
+                $8, $9, $10, $11, $12, $13, $14
+              )
             `, [
               importId,
-              propertyName,
+              currentProperty,
               txnDate,
               description,
               currentSection,
-              amount,
+              bucket.amount,
               bucket.direction,
               rowNumber,
               description,
               currentSection,
-              bucket.income_amount,
-              bucket.expense_amount,
-              txnDate ? Number(String(txnDate).slice(0, 4)) : null,
+              bucket.incomeAmount,
+              bucket.expenseAmount,
+              txnDate ? Number(txnDate.slice(0, 4)) : null,
               sheetName
             ]);
+
             rowCount++;
             continue;
           }
 
-          await insertIssue(importId, 'unmapped_row', `Could not classify row from sheet "${sheetName}"`, rowNumber);
-          continue;
+          /*
+            Do not create an issue for headings, labels, totals, or sparse
+            spreadsheet layout rows. An issue is reserved for a row with an
+            apparent transaction amount that could not be imported.
+          */
+          if (lastNumber !== null && values.length >= 2) {
+            await insertIssue(
+              importId,
+              'unmapped_row',
+              `Could not classify row from sheet "${sheetName}"`,
+              rowNumber
+            );
+          }
         }
       }
     }
@@ -815,8 +1057,13 @@ app.post('/setup/import', upload.single('spreadsheet'), async (req, res) => {
 
     if (importId) {
       try {
-        await query('DELETE FROM imports WHERE id = $1', [importId]);
-      } catch (_) {}
+        await query(`
+          DELETE FROM imports
+          WHERE id = $1
+        `, [importId]);
+      } catch (cleanupErr) {
+        console.error('Import rollback failed:', cleanupErr);
+      }
     }
 
     removeUploadedFile(req.file.path);
@@ -824,13 +1071,151 @@ app.post('/setup/import', upload.single('spreadsheet'), async (req, res) => {
   }
 });
 
+app.get('/data/imports', async (req, res) => {
+  try {
+    const latestImport = await getLatestImport();
+
+    const imports = await getRecentImports(100);
+
+    const issues = latestImport
+      ? (await query(`
+          SELECT
+            issue_type,
+            message,
+            row_number,
+            created_at
+          FROM import_issues
+          WHERE import_id = $1
+          ORDER BY id DESC
+        `, [latestImport.id])).rows
+      : [];
+
+    res.render('imports', {
+      latestImport,
+      imports,
+      recentImports: imports,
+      issues,
+      importIssues: issues,
+      stats: await getStats(),
+      latestImportStats: await getLatestImportStats()
+    });
+  } catch (err) {
+    console.error('GET /data/imports failed:', err);
+    res.status(500).send(`Internal Server Error: ${err.message}`);
+  }
+});
+
+app.get('/reports/cash-flow', async (req, res) => {
+  try {
+    const latestImport = await getLatestImport();
+
+    if (!latestImport) {
+      return res.status(400).send('No imports found');
+    }
+
+    const propertyFilter = String(req.query.property_name || '').trim();
+    const params = [latestImport.id];
+    let propertyWhere = '';
+
+    if (propertyFilter) {
+      params.push(propertyFilter);
+      propertyWhere = `AND property_name = $${params.length}`;
+    }
+
+    const rowsResult = await query(`
+      SELECT
+        property_name,
+        substr(txn_date, 1, 7) AS month,
+        COUNT(*)::int AS txn_count,
+        ROUND(
+          SUM(
+            COALESCE(
+              income_amount,
+              CASE WHEN amount > 0 THEN amount ELSE 0 END
+            )
+          )::numeric,
+          2
+        ) AS income_total,
+        ROUND(
+          ABS(
+            SUM(
+              COALESCE(
+                expense_amount,
+                CASE WHEN amount < 0 THEN amount ELSE 0 END
+              )
+            )
+          )::numeric,
+          2
+        ) AS expense_total,
+        ROUND(SUM(amount)::numeric, 2) AS net_total
+      FROM transactions
+      WHERE import_id = $1
+        AND property_name IS NOT NULL
+        AND TRIM(property_name) <> ''
+        AND txn_date IS NOT NULL
+        ${propertyWhere}
+      GROUP BY property_name, substr(txn_date, 1, 7)
+      ORDER BY property_name, month
+    `, params);
+
+    const propertiesResult = await query(`
+      SELECT DISTINCT property_name
+      FROM transactions
+      WHERE import_id = $1
+        AND property_name IS NOT NULL
+        AND TRIM(property_name) <> ''
+      ORDER BY property_name
+    `, [latestImport.id]);
+
+    res.render('cash-flow-report', {
+      latestImportId: latestImport.id,
+      propertyFilter,
+      properties: propertiesResult.rows,
+      rows: rowsResult.rows
+    });
+  } catch (err) {
+    console.error('GET /reports/cash-flow failed:', err);
+    res.status(500).send(`Internal Server Error: ${err.message}`);
+  }
+});
+
+app.post('/imports/rollback-last', async (req, res) => {
+  try {
+    const latestImport = await getLatestImport();
+
+    if (!latestImport) {
+      return res.status(400).send('No imports found to roll back');
+    }
+
+    await query(`
+      DELETE FROM imports
+      WHERE id = $1
+    `, [latestImport.id]);
+
+    res.redirect('/data/imports');
+  } catch (err) {
+    console.error('POST /imports/rollback-last failed:', err);
+    res.status(500).send(`Internal Server Error: ${err.message}`);
+  }
+});
+
 app.get('/health', async (req, res) => {
   try {
     await query('SELECT 1');
-    res.json({ ok: true });
+
+    res.json({
+      ok: true
+    });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({
+      ok: false,
+      error: err.message
+    });
   }
+});
+
+app.use((req, res) => {
+  res.status(404).send(`Not found: ${req.method} ${req.originalUrl}`);
 });
 
 initDb()
