@@ -490,10 +490,27 @@ app.post('/setup/import', upload.single('workbook'), async (req, res) => {
 
     const importId = importResult.rows[0].id;
     let rowCount = 0;
+    const allowedSheets = new Set([
+  'Revenue & Expenses updated ',
+  'Accounts',
+  'Property Values'
+]);
 
-    for (const sheetName of workbook.SheetNames) {
-      const sheet = workbook.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+const skippedSheets = new Set([
+  'Cleanup Notes'
+]);
+
+ for (const sheetName of workbook.SheetNames) {
+  if (skippedSheets.has(sheetName)) {
+    continue;
+  }
+
+  if (!allowedSheets.has(sheetName)) {
+    continue;
+  }
+  if (!allowedSheets.has(sheetName)) {
+    continue;
+  }
 
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
