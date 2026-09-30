@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="utf-8"/>
+    <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Setup</title>
     <style>
@@ -12,24 +12,23 @@
         padding: 0 16px;
         color: #222;
       }
-      h1, h2 {
+
+      h1,
+      h2 {
         margin-bottom: 8px;
       }
+
       p {
         line-height: 1.5;
       }
+
       .card {
         border: 1px solid #ddd;
         border-radius: 10px;
         padding: 20px;
         margin: 20px 0;
       }
-      .actions {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
-        margin-top: 16px;
-      }
+
       .btn {
         display: inline-block;
         padding: 10px 14px;
@@ -40,43 +39,57 @@
         color: #111;
         cursor: pointer;
       }
+
       .btn-primary {
         background: #111;
         color: #fff;
         border-color: #111;
       }
+
       .btn-danger {
         background: #fff4f4;
         color: #9f1239;
         border-color: #f2c2c2;
       }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 12px;
-      }
-      th, td {
-        border: 1px solid #ddd;
-        padding: 10px;
-        text-align: left;
-      }
-      th {
-        background: #f3f3f3;
-      }
-      .muted {
-        color: #666;
-      }
-      .danger-zone {
-        margin-top: 18px;
-        padding-top: 16px;
-        border-top: 1px solid #eee;
-      }
+
       .upload-form {
         display: flex;
         gap: 12px;
         align-items: center;
         flex-wrap: wrap;
         margin-top: 12px;
+      }
+
+      .danger-zone {
+        margin-top: 18px;
+        padding-top: 16px;
+        border-top: 1px solid #eee;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+
+      th,
+      td {
+        border: 1px solid #ddd;
+        padding: 10px;
+        text-align: left;
+      }
+
+      th {
+        background: #f3f3f3;
+      }
+
+      .muted {
+        color: #666;
+      }
+
+      .import-link {
+        color: #111;
+        font-weight: 700;
       }
     </style>
   </head>
@@ -86,23 +99,39 @@
 
     <div class="card">
       <h2>Upload workbook</h2>
-      <p class="muted">Choose your Excel workbook to seed or refresh your financial data.</p>
+      <p class="muted">
+        Choose your Excel workbook to seed or refresh your financial data.
+      </p>
 
-      <form action="/setup/import" method="post" enctype="multipart/form-data" class="upload-form">
-        <input type="file" name="spreadsheet" accept=".xlsx,.xls" required />
-        <button class="btn btn-primary" type="submit">Upload</button>
+      <form
+        action="/setup/import"
+        method="post"
+        enctype="multipart/form-data"
+        class="upload-form"
+      >
+        <input
+          type="file"
+          name="workbook"
+          accept=".xlsx,.xls"
+          required
+        />
+        <button class="btn btn-primary" type="submit">Upload workbook</button>
       </form>
 
       <div class="danger-zone">
         <h2>Rollback</h2>
-        <p class="muted">Delete all data tied to the most recent import.</p>
+        <p class="muted">
+          Delete all data tied to the most recent import.
+        </p>
 
         <form
           action="/imports/rollback-last"
-          method="POST"
+          method="post"
           onsubmit="return confirm('Roll back the most recent import? This cannot be undone.');"
         >
-          <button class="btn btn-danger" type="submit">Roll back last import</button>
+          <button class="btn btn-danger" type="submit">
+            Roll back last import
+          </button>
         </form>
       </div>
     </div>
@@ -111,11 +140,16 @@
       <h2>Latest import</h2>
 
       <% if (typeof latestImport !== 'undefined' && latestImport) { %>
+        <p>
+          <strong>Import:</strong>
+          <a class="import-link" href="/imports/<%= latestImport.id %>">
+            #<%= latestImport.id %>
+          </a>
+        </p>
         <p><strong>File:</strong> <%= latestImport.filename %></p>
         <p><strong>Imported at:</strong> <%= latestImport.imported_at %></p>
-        <% if (latestImport.row_count !== undefined) { %>
-          <p><strong>Rows:</strong> <%= latestImport.row_count %></p>
-        <% } %>
+        <p><strong>Rows:</strong> <%= latestImport.row_count ?? 0 %></p>
+        <p><strong>Sheets:</strong> <%= latestImport.sheet_count ?? 0 %></p>
       <% } else { %>
         <p class="muted">No imports yet.</p>
       <% } %>
@@ -137,10 +171,14 @@
           <tbody>
             <% recentImports.forEach(function(item) { %>
               <tr>
-                <td><%= item.id %></td>
+                <td>
+                  <a class="import-link" href="/imports/<%= item.id %>">
+                    #<%= item.id %>
+                  </a>
+                </td>
                 <td><%= item.filename %></td>
                 <td><%= item.imported_at %></td>
-                <td><%= item.row_count ?? '' %></td>
+                <td><%= item.row_count ?? 0 %></td>
               </tr>
             <% }) %>
           </tbody>
