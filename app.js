@@ -141,7 +141,19 @@ function normalizeDate(value) {
   }
 
   const str = String(value).trim();
-  return str || null;
+  if (!str) return null;
+
+  const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return str;
+
+  const us = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (us) {
+    let [, m, d, y] = us;
+    if (y.length === 2) y = `20${y}`;
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+
+  return str;
 }
 
 function pick(obj, keys) {
@@ -168,21 +180,54 @@ function hasAnyMeaningfulValue(row) {
   });
 }
 
-function shouldSkipRow(lowerRow, sheetType) {
-  if (!hasAnyMeaningfulValue(lowerRow)) {
-    return true;
+function cleanCell(value) {
+  if (value == null) return '';
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
+function cleanRowArray(row) {
+  return (row || []).map(cleanCell);
+}
+
+function rowHasMeaningfulCell(row) {
+  return row.some((cell) => cell !== '');
+}
+
+function findFirstText(row) {
+  for (const cell of row) {
+    if (!cell) continue;
+    if (toNumber(cell) === null && !normalizeDate(cell)?.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      return cell;
+    }
   }
+  return null;
+}
 
-  const values = Object.values(lowerRow)
-    .filter((value) => value != null)
-    .map((value) => String(value).trim())
-    .filter(Boolean);
-
-  if (!values.length) {
-    return true;
+function findLastNumber(row) {
+  for (let i = row.length - 1; i >= 0; i--) {
+    const num = toNumber(row[i]);
+    if (num !== null) return num;
   }
+  return null;
+}
 
-  const joined = values.join(' ').toLowerCase();
+function findDateInRow(row) {
+  for (const cell of row) {
+    const normalized = normalizeDate(cell);
+    if (!normalized) continue;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
+    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(String(cell).trim())) return normalized;
+  }
+  return null;
+}
+
+function shouldSkipArrayRow(row) {
+  if (!rowHasMeaningfulCell(row)) return true;
+
+  const values = row.filter(Boolean).map((v) => v.toLowerCase());
+  if (!values.length) return true;
+
+  const joined = values.join(' ');
 
   const genericNoisePatterns = [
     'total',
@@ -202,36 +247,62 @@ function shouldSkipRow(lowerRow, sheetType) {
     return true;
   }
 
-  if (sheetType === 'accounts') {
-    const accountName = pick(lowerRow, ['account', 'account name', 'name']);
-    const balance = toNumber(pick(lowerRow, ['balance', 'ending balance', 'current balance']));
-
-    if (!accountName && balance === null) {
-      return true;
-    }
-  }
-
-  if (sheetType === 'property_values') {
-    const propertyName = pick(lowerRow, ['property', 'property name']);
-    const propertyValue = toNumber(pick(lowerRow, ['property value', 'value', 'valuation']));
-
-    if (!propertyName && propertyValue === null) {
-      return true;
-    }
-  }
-
-  if (sheetType === 'transactions') {
-    const propertyName = pick(lowerRow, ['property', 'property name']);
-    const amount = toNumber(pick(lowerRow, ['amount', 'net', 'transaction amount']));
-    const description = pick(lowerRow, ['description', 'memo', 'notes', 'reason']);
-    const txnDate = normalizeDate(pick(lowerRow, ['transaction date', 'date', 'txn date']));
-
-    if (!propertyName && amount === null && !description && !txnDate) {
-      return true;
-    }
-  }
-
   return false;
+}
+
+function detectSheetType(sheetName) {
+  const normalized = normalizeSheetName(sheetName);
+
+  if (normalized.includes('revenue') || normalized.includes('expense')) return 'revenue_expenses';
+  if (normalized.includes('account')) return 'accounts';
+  if (normalized.includes('property') && normalized.includes('value')) return 'property_values';
+  if (normalized.includes('payment')) return 'payments';
+  if (normalized.includes('cleanup') || normalized.includes('note')) return 'ignore';
+  return 'unknown';
+}
+
+function inferDirectionAndBuckets(amount, currentSection) {
+  if (amount == null) {
+    return { direction: null, income_amount: null, expense_amount: null };
+  }
+
+  if (currentSection === 'revenue') {
+    return {
+      direction: 'inflow',
+      income_amount: Math.abs(amount),
+      expense_amount: null
+    };
+  }
+
+  if (currentSection === 'expense') {
+    return {
+      direction: 'outflow',
+      income_amount: null,
+      expense_amount: Math.abs(amount),
+      amount: -Math.abs(amount)
+    };
+  }
+
+  if (amount < 0) {
+    return {
+      direction: 'outflow',
+      income_amount: null,
+      expense_amount: Math.abs(amount)
+    };
+  }
+
+  return {
+    direction: 'inflow',
+    income_amount: Math.abs(amount),
+    expense_amount: null
+  };
+}
+
+async function insertIssue(importId, issueType, message, rowNumber) {
+  await query(`
+    INSERT INTO import_issues (import_id, issue_type, message, row_number)
+    VALUES ($1, $2, $3, $4)
+  `, [importId, issueType, message, rowNumber]);
 }
 
 async function getStats() {
@@ -507,7 +578,6 @@ app.use((req, res, next) => {
 app.get('/', async (req, res) => {
   try {
     const selectedMonth = await getSelectedMonth(req.query.month);
-
     res.render('index', {
       latestImport: await getLatestImport(),
       recentImports: await getRecentImports(10),
@@ -545,10 +615,25 @@ app.get('/monthly-review', async (req, res) => {
 
 app.get('/setup', async (req, res) => {
   try {
+    const latestImport = await getLatestImport();
+    const stats = await getStats();
+    const latestImportStats = await getLatestImportStats();
+    const recentImports = await getRecentImports(10);
+    const issues = latestImport
+      ? (await query(`
+          SELECT issue_type, message, row_number
+          FROM import_issues
+          WHERE import_id = $1
+          ORDER BY id
+        `, [latestImport.id])).rows
+      : [];
+
     res.render('setup', {
-      latestImport: await getLatestImport(),
-      recentImports: await getRecentImports(10),
-      stats: await getStats()
+      latestImport,
+      stats,
+      latestImportStats,
+      recentImports,
+      issues
     });
   } catch (err) {
     console.error('GET /setup failed:', err);
@@ -556,327 +641,202 @@ app.get('/setup', async (req, res) => {
   }
 });
 
-app.post('/setup/import', upload.single('workbook'), async (req, res) => {
+app.post('/setup/import', upload.single('spreadsheet'), async (req, res) => {
   if (!req.file) {
-    return res.status(400).send('No file uploaded.');
+    return res.status(400).send('No file uploaded');
   }
 
-  const client = await pool.connect();
+  let importId = null;
+  let rowCount = 0;
 
   try {
-    const workbook = XLSX.readFile(req.file.path);
-    const importedAt = new Date();
-
-    const sheetConfigs = new Map([
-      ['revenue & expenses updated', { type: 'transactions', logIssues: true }],
-      ['accounts', { type: 'accounts', logIssues: false }],
-      ['property values', { type: 'property_values', logIssues: false }]
-    ]);
-
-    await client.query('BEGIN');
-
-    const importResult = await client.query(`
+    const workbook = XLSX.readFile(req.file.path, { cellDates: false });
+    const importResult = await query(`
       INSERT INTO imports (filename, imported_at, sheet_count, row_count, notes)
-      VALUES ($1, $2, $3, $4, $5)
+      VALUES ($1, CURRENT_TIMESTAMP, $2, 0, $3)
       RETURNING id
     `, [
       req.file.originalname,
-      importedAt,
       workbook.SheetNames.length,
-      0,
-      'Imported only mapped workbook tabs; skipped layout rows and non-data summary rows'
+      'Imported with array-based summary parser'
     ]);
 
-    const importId = importResult.rows[0].id;
-    let rowCount = 0;
+    importId = importResult.rows[0].id;
 
     for (const sheetName of workbook.SheetNames) {
-      const normalizedName = normalizeSheetName(sheetName);
-      const sheetConfig = sheetConfigs.get(normalizedName);
+      const sheetType = detectSheetType(sheetName);
+      const ws = workbook.Sheets[sheetName];
 
-      if (!sheetConfig) {
-        continue;
-      }
+      if (!ws) continue;
+      if (sheetType === 'ignore') continue;
 
-      const sheet = workbook.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+      const rows = XLSX.utils.sheet_to_json(ws, {
+        header: 1,
+        raw: false,
+        blankrows: false
+      })
+        .map(cleanRowArray)
+        .filter((row) => rowHasMeaningfulCell(row));
 
-      for (let index = 0; index < rows.length; index += 1) {
+      let currentSection = null;
+      let currentProperty = null;
+
+      for (let index = 0; index < rows.length; index++) {
         const row = rows[index];
-        const lowerRow = {};
+        const rowNumber = index + 1;
 
-        Object.keys(row).forEach((key) => {
-          lowerRow[String(key).trim().toLowerCase()] = row[key];
-        });
+        if (shouldSkipArrayRow(row)) continue;
 
-        if (shouldSkipRow(lowerRow, sheetConfig.type)) {
+        const joined = row.filter(Boolean).join(' ').toLowerCase();
+        const firstText = findFirstText(row);
+        const amountRaw = findLastNumber(row);
+        const txnDate = findDateInRow(row);
+
+        if (joined.includes('revenue')) {
+          currentSection = 'revenue';
           continue;
         }
 
-        rowCount += 1;
-
-        const accountName = pick(lowerRow, ['account', 'account name', 'name']);
-        const balance = toNumber(pick(lowerRow, ['balance', 'ending balance', 'current balance']));
-        const asOf = normalizeDate(pick(lowerRow, ['as of', 'date', 'snapshot date']));
-
-        const propertyName = pick(lowerRow, ['property', 'property name']);
-        const txnDate = normalizeDate(pick(lowerRow, ['transaction date', 'date', 'txn date']));
-        const description = pick(lowerRow, ['description', 'memo', 'notes', 'reason']);
-        const category = pick(lowerRow, ['category', 'type', 'source category']);
-        const amount = toNumber(pick(lowerRow, ['amount', 'net', 'transaction amount']));
-        const direction = pick(lowerRow, ['direction', 'income/expense', 'flow']);
-        const propertyValue = toNumber(pick(lowerRow, ['property value', 'value', 'valuation']));
-
-        let inserted = false;
-
-        if (sheetConfig.type === 'accounts' && accountName && balance !== null) {
-          await client.query(`
-            INSERT INTO account_snapshots (import_id, account_name, balance, as_of)
-            VALUES ($1, $2, $3, $4)
-          `, [importId, accountName, balance, asOf]);
-          inserted = true;
+        if (joined.includes('expense')) {
+          currentSection = 'expense';
+          continue;
         }
 
-        if (sheetConfig.type === 'transactions' && propertyName && amount !== null) {
-          const incomeAmount = amount > 0 ? amount : 0;
-          const expenseAmount = amount < 0 ? amount : 0;
-          const parsedYear = txnDate && txnDate.length >= 4 ? Number(txnDate.slice(0, 4)) : null;
-          const yearTag = Number.isInteger(parsedYear) ? parsedYear : null;
-
-          await client.query(`
-            INSERT INTO transactions (
-              import_id, property_name, txn_date, description, category, amount, direction, source_row,
-              reason, source_category, income_amount, expense_amount, year_tag, source_sheet
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-          `, [
-            importId,
-            propertyName,
-            txnDate,
-            description,
-            category,
-            amount,
-            direction,
-            index + 2,
-            description,
-            category || 'payments',
-            incomeAmount,
-            expenseAmount,
-            yearTag,
-            sheetName
-          ]);
-          inserted = true;
+        if (
+          firstText &&
+          !txnDate &&
+          amountRaw === null &&
+          row.filter(Boolean).length === 1 &&
+          !['revenue', 'expenses', 'expense', 'accounts', 'property values'].includes(firstText.toLowerCase())
+        ) {
+          currentProperty = firstText;
+          continue;
         }
 
-        if (sheetConfig.type === 'property_values' && propertyName && propertyValue !== null) {
-          await client.query(`
-            INSERT INTO property_values (import_id, property_name, property_value, as_of)
-            VALUES ($1, $2, $3, $4)
-          `, [importId, propertyName, propertyValue, asOf]);
-          inserted = true;
+        if (sheetType === 'accounts') {
+          const accountName = firstText;
+          const balance = amountRaw;
+
+          if (accountName && balance !== null) {
+            await query(`
+              INSERT INTO account_snapshots (import_id, account_name, balance, as_of)
+              VALUES ($1, $2, $3, $4)
+            `, [importId, accountName, balance, txnDate]);
+            rowCount++;
+            continue;
+          }
+
+          await insertIssue(importId, 'unmapped_row', `Could not classify row from sheet "${sheetName}"`, rowNumber);
+          continue;
         }
 
-        if (!inserted && sheetConfig.logIssues) {
-          await client.query(`
-            INSERT INTO import_issues (import_id, issue_type, message, row_number)
-            VALUES ($1, $2, $3, $4)
-          `, [
-            importId,
-            'unmapped_row',
-            `Could not classify row from sheet "${sheetName}"`,
-            index + 2
-          ]);
+        if (sheetType === 'property_values') {
+          const propertyName = firstText || currentProperty;
+          const propertyValue = amountRaw;
+
+          if (propertyName && propertyValue !== null) {
+            await query(`
+              INSERT INTO property_values (import_id, property_name, property_value, as_of)
+              VALUES ($1, $2, $3, $4)
+            `, [importId, propertyName, propertyValue, txnDate]);
+            rowCount++;
+            continue;
+          }
+
+          await insertIssue(importId, 'unmapped_row', `Could not classify row from sheet "${sheetName}"`, rowNumber);
+          continue;
+        }
+
+        if (sheetType === 'revenue_expenses' || sheetType === 'payments' || sheetType === 'unknown') {
+          const description = firstText;
+          let amount = amountRaw;
+          const propertyName = currentProperty;
+          const bucket = inferDirectionAndBuckets(amount, currentSection);
+
+          if (bucket.amount != null) {
+            amount = bucket.amount;
+          }
+
+          if ((description || propertyName) && amount !== null) {
+            await query(`
+              INSERT INTO transactions (
+                import_id,
+                property_name,
+                txn_date,
+                description,
+                category,
+                amount,
+                direction,
+                source_row,
+                reason,
+                source_category,
+                income_amount,
+                expense_amount,
+                year_tag,
+                source_sheet
+              )
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            `, [
+              importId,
+              propertyName,
+              txnDate,
+              description,
+              currentSection,
+              amount,
+              bucket.direction,
+              rowNumber,
+              description,
+              currentSection,
+              bucket.income_amount,
+              bucket.expense_amount,
+              txnDate ? Number(String(txnDate).slice(0, 4)) : null,
+              sheetName
+            ]);
+            rowCount++;
+            continue;
+          }
+
+          await insertIssue(importId, 'unmapped_row', `Could not classify row from sheet "${sheetName}"`, rowNumber);
+          continue;
         }
       }
     }
 
-    await client.query(
-      'UPDATE imports SET row_count = $1 WHERE id = $2',
-      [rowCount, importId]
-    );
+    await query(`
+      UPDATE imports
+      SET row_count = $2
+      WHERE id = $1
+    `, [importId, rowCount]);
 
-    await client.query('COMMIT');
     removeUploadedFile(req.file.path);
-
-    return res.redirect(`/imports/${importId}`);
+    res.redirect('/setup');
   } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch (_) {}
-
     console.error('POST /setup/import failed:', err);
+
+    if (importId) {
+      try {
+        await query('DELETE FROM imports WHERE id = $1', [importId]);
+      } catch (_) {}
+    }
+
     removeUploadedFile(req.file.path);
-
-    return res.status(500).send(`Import failed: ${err.message}`);
-  } finally {
-    client.release();
+    res.status(500).send(`Import failed: ${err.message}`);
   }
 });
 
-app.get('/data/imports', async (req, res) => {
+app.get('/health', async (req, res) => {
   try {
-    res.render('imports', {
-      latestImport: await getLatestImport(),
-      recentImports: await getRecentImports(25),
-      stats: await getStats()
-    });
+    await query('SELECT 1');
+    res.json({ ok: true });
   } catch (err) {
-    console.error('GET /data/imports failed:', err);
-    res.status(500).send(`Internal Server Error: ${err.message}`);
+    res.status(500).json({ ok: false, error: err.message });
   }
-});
-
-app.get('/imports/:id', async (req, res) => {
-  try {
-    const importId = Number(req.params.id);
-
-    if (!Number.isInteger(importId) || importId <= 0) {
-      return res.status(400).send('Invalid import ID.');
-    }
-
-    const impResult = await query('SELECT * FROM imports WHERE id = $1', [importId]);
-    const imp = impResult.rows[0];
-
-    if (!imp) {
-      return res.status(404).send('Import not found.');
-    }
-
-    const accounts = (await query(`
-      SELECT *
-      FROM account_snapshots
-      WHERE import_id = $1
-      ORDER BY account_name, as_of
-    `, [importId])).rows;
-
-    const properties = (await query(`
-      SELECT
-        property_name,
-        COUNT(*)::int AS txn_count,
-        SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS income_total,
-        SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) AS expense_total,
-        SUM(amount) AS net_total
-      FROM transactions
-      WHERE import_id = $1
-      GROUP BY property_name
-      ORDER BY property_name
-    `, [importId])).rows;
-
-    const propertyValues = (await query(`
-      SELECT *
-      FROM property_values
-      WHERE import_id = $1
-      ORDER BY property_name, as_of
-    `, [importId])).rows;
-
-    const issues = (await query(`
-      SELECT *
-      FROM import_issues
-      WHERE import_id = $1
-      ORDER BY row_number, id
-    `, [importId])).rows;
-
-    res.render('import-detail', {
-      imp,
-      accounts,
-      properties,
-      propertyValues,
-      issues
-    });
-  } catch (err) {
-    console.error('GET /imports/:id failed:', err);
-    res.status(500).send(`Internal Server Error: ${err.message}`);
-  }
-});
-
-app.post('/imports/:id/rollback', async (req, res) => {
-  const client = await pool.connect();
-
-  try {
-    const importId = Number(req.params.id);
-
-    if (!Number.isInteger(importId) || importId <= 0) {
-      return res.status(400).send('Invalid import ID.');
-    }
-
-    const imp = (await client.query('SELECT id FROM imports WHERE id = $1', [importId])).rows[0];
-
-    if (!imp) {
-      return res.status(404).send('Import not found.');
-    }
-
-    await client.query('BEGIN');
-    await client.query('DELETE FROM import_issues WHERE import_id = $1', [importId]);
-    await client.query('DELETE FROM transactions WHERE import_id = $1', [importId]);
-    await client.query('DELETE FROM property_values WHERE import_id = $1', [importId]);
-    await client.query('DELETE FROM account_snapshots WHERE import_id = $1', [importId]);
-    await client.query('DELETE FROM imports WHERE id = $1', [importId]);
-    await client.query('COMMIT');
-
-    return res.redirect('/data/imports');
-  } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch (_) {}
-
-    console.error('POST /imports/:id/rollback failed:', err);
-    return res.status(500).send(`Rollback failed: ${err.message}`);
-  } finally {
-    client.release();
-  }
-});
-
-app.post('/imports/rollback-last', async (req, res) => {
-  const client = await pool.connect();
-
-  try {
-    const latest = (await client.query(`
-      SELECT id
-      FROM imports
-      ORDER BY id DESC
-      LIMIT 1
-    `)).rows[0];
-
-    if (!latest) {
-      return res.status(404).send('No imports found to roll back.');
-    }
-
-    await client.query('BEGIN');
-    await client.query('DELETE FROM import_issues WHERE import_id = $1', [latest.id]);
-    await client.query('DELETE FROM transactions WHERE import_id = $1', [latest.id]);
-    await client.query('DELETE FROM property_values WHERE import_id = $1', [latest.id]);
-    await client.query('DELETE FROM account_snapshots WHERE import_id = $1', [latest.id]);
-    await client.query('DELETE FROM imports WHERE id = $1', [latest.id]);
-    await client.query('COMMIT');
-
-    return res.redirect('/data/imports');
-  } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch (_) {}
-
-    console.error('POST /imports/rollback-last failed:', err);
-    return res.status(500).send(`Rollback failed: ${err.message}`);
-  } finally {
-    client.release();
-  }
-});
-
-app.get('/expenses/new', (req, res) => {
-  res.send('Add expense page placeholder');
-});
-
-app.get('/sales/new', (req, res) => {
-  res.send('Record sale page placeholder');
-});
-
-app.use((req, res) => {
-  res.status(404).send(`Cannot ${req.method} ${req.path}`);
 });
 
 initDb()
   .then(() => {
     app.listen(PORT, () => {
-      console.log(`Financial importer running on http://localhost:${PORT}/`);
+      console.log(`Server listening on port ${PORT}`);
     });
   })
   .catch((err) => {
