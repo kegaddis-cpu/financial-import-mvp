@@ -678,7 +678,7 @@ app.post('/imports/:id/rollback', async (req, res) => {
 
     if (!Number.isInteger(importId) || importId <= 0) {
       client.release();
-      return res.stat  us(400).send('Invalid import ID.');
+      return res.status(400).send('Invalid import ID.');
     }
 
     const imp = (await client.query('SELECT id FROM imports WHERE id = $1', [importId])).rows[0];
