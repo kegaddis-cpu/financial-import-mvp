@@ -526,8 +526,8 @@ app.post('/setup/import', upload.single('workbook'), async (req, res) => {
         if (propertyName && amount !== null) {
           const incomeAmount = amount > 0 ? amount : 0;
           const expenseAmount = amount < 0 ? amount : 0;
-          const yearTag = txnDate && txnDate.length >= 4 ? Number(txnDate.slice(0, 4)) : null;
-
+          const parsedYear = txnDate && txnDate.length >= 4 ? Number(txnDate.slice(0, 4)) : null;
+          
           await client.query(`
             INSERT INTO transactions (
               import_id, property_name, txn_date, description, category, amount, direction, source_row,
