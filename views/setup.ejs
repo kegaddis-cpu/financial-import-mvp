@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
+    <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Setup</title>
     <style>
@@ -71,6 +71,13 @@
         padding-top: 16px;
         border-top: 1px solid #eee;
       }
+      .upload-form {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
     </style>
   </head>
   <body>
@@ -81,10 +88,10 @@
       <h2>Upload workbook</h2>
       <p class="muted">Choose your Excel workbook to seed or refresh your financial data.</p>
 
-     <form action="/setup/import" method="post" enctype="multipart/form-data">
-     <input type="file" name="workbook" accept=".xlsx,.xls" required>
-     <button type="submit">Upload</button>
-     </form>
+      <form action="/setup/import" method="post" enctype="multipart/form-data" class="upload-form">
+        <input type="file" name="spreadsheet" accept=".xlsx,.xls" required />
+        <button class="btn btn-primary" type="submit">Upload</button>
+      </form>
 
       <div class="danger-zone">
         <h2>Rollback</h2>
