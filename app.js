@@ -12,8 +12,11 @@ const uploadsDir = path.join(__dirname, 'uploads');
 const publicDir = path.join(__dirname, 'public');
 const viewsDir = path.join(__dirname, 'views');
 
-
-console.log('DATABASE_URL present:', !!process.env.DATABASE_URL, process.env.DATABASE_URL?.slice(0, 20));
+console.log(
+  'DATABASE_URL present:',
+  !!process.env.DATABASE_URL,
+  process.env.DATABASE_URL?.slice(0, 20)
+);
 
 fs.mkdirSync(uploadsDir, { recursive: true });
 fs.mkdirSync(publicDir, { recursive: true });
@@ -35,6 +38,13 @@ const upload = multer({ dest: uploadsDir });
 
 async function query(sql, params = []) {
   return pool.query(sql, params);
+}
+
+function removeUploadedFile(filePath) {
+  if (!filePath) return;
+  try {
+    fs.unlinkSync(filePath);
+  } catch (_) {}
 }
 
 async function initDb() {
@@ -142,6 +152,10 @@ function pick(obj, keys) {
   return null;
 }
 
+function normalizeSheetName(sheetName) {
+  return String(sheetName || '').trim().toLowerCase();
+}
+
 async function getStats() {
   const importsCount = (await query('SELECT COUNT(*)::int AS count FROM imports')).rows[0].count;
   const transactionsCount = (await query('SELECT COUNT(*)::int AS count FROM transactions')).rows[0].count;
@@ -213,7 +227,7 @@ async function getAvailableMonths() {
       AND length(txn_date) >= 7
     ORDER BY month DESC
   `);
-  return result.rows.map(row => row.month);
+  return result.rows.map((row) => row.month);
 }
 
 async function getSelectedMonth(requestedMonth) {
@@ -474,6 +488,12 @@ app.post('/setup/import', upload.single('workbook'), async (req, res) => {
     const workbook = XLSX.readFile(req.file.path);
     const importedAt = new Date();
 
+    const allowedSheets = new Set([
+      'revenue & expenses updated',
+      'accounts',
+      'property values'
+    ]);
+
     await client.query('BEGIN');
 
     const importResult = await client.query(`
@@ -485,32 +505,21 @@ app.post('/setup/import', upload.single('workbook'), async (req, res) => {
       importedAt,
       workbook.SheetNames.length,
       0,
-      null
+      'Imported only: Revenue & Expenses updated, Accounts, Property Values'
     ]);
 
     const importId = importResult.rows[0].id;
     let rowCount = 0;
-    const allowedSheets = new Set([
-  'Revenue & Expenses updated ',
-  'Accounts',
-  'Property Values'
-]);
 
-const skippedSheets = new Set([
-  'Cleanup Notes'
-]);
+    for (const sheetName of workbook.SheetNames) {
+      const normalizedName = normalizeSheetName(sheetName);
 
- for (const sheetName of workbook.SheetNames) {
-  if (skippedSheets.has(sheetName)) {
-    continue;
-  }
+      if (!allowedSheets.has(normalizedName)) {
+        continue;
+      }
 
-  if (!allowedSheets.has(sheetName)) {
-    continue;
-  }
-  if (!allowedSheets.has(sheetName)) {
-    continue;
-  }
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
 
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
@@ -541,11 +550,11 @@ const skippedSheets = new Set([
         }
 
         if (propertyName && amount !== null) {
-        const incomeAmount = amount > 0 ? amount : 0;
-        const expenseAmount = amount < 0 ? amount : 0;
-        const parsedYear = txnDate && txnDate.length >= 4 ? Number(txnDate.slice(0, 4)) : null;
-        const yearTag = Number.isInteger(parsedYear) ? parsedYear : null;
-          
+          const incomeAmount = amount > 0 ? amount : 0;
+          const expenseAmount = amount < 0 ? amount : 0;
+          const parsedYear = txnDate && txnDate.length >= 4 ? Number(txnDate.slice(0, 4)) : null;
+          const yearTag = Number.isInteger(parsedYear) ? parsedYear : null;
+
           await client.query(`
             INSERT INTO transactions (
               import_id, property_name, txn_date, description, category, amount, direction, source_row,
@@ -594,18 +603,16 @@ const skippedSheets = new Set([
     await client.query('UPDATE imports SET row_count = $1 WHERE id = $2', [rowCount, importId]);
     await client.query('COMMIT');
 
-    try {
-      fs.unlinkSync(req.file.path);
-    } catch (_) {}
+    removeUploadedFile(req.file.path);
 
     return res.redirect(`/imports/${importId}`);
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('POST /setup/import failed:', err);
-
     try {
-      fs.unlinkSync(req.file.path);
+      await client.query('ROLLBACK');
     } catch (_) {}
+
+    console.error('POST /setup/import failed:', err);
+    removeUploadedFile(req.file.path);
 
     return res.status(500).send(`Import failed: ${err.message}`);
   } finally {
@@ -695,14 +702,12 @@ app.post('/imports/:id/rollback', async (req, res) => {
     const importId = Number(req.params.id);
 
     if (!Number.isInteger(importId) || importId <= 0) {
-      client.release();
       return res.status(400).send('Invalid import ID.');
     }
 
     const imp = (await client.query('SELECT id FROM imports WHERE id = $1', [importId])).rows[0];
 
     if (!imp) {
-      client.release();
       return res.status(404).send('Import not found.');
     }
 
@@ -716,7 +721,10 @@ app.post('/imports/:id/rollback', async (req, res) => {
 
     return res.redirect('/data/imports');
   } catch (err) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+
     console.error('POST /imports/:id/rollback failed:', err);
     return res.status(500).send(`Rollback failed: ${err.message}`);
   } finally {
@@ -740,18 +748,19 @@ app.post('/imports/rollback-last', async (req, res) => {
     }
 
     await client.query('BEGIN');
-
     await client.query('DELETE FROM import_issues WHERE import_id = $1', [latest.id]);
     await client.query('DELETE FROM transactions WHERE import_id = $1', [latest.id]);
     await client.query('DELETE FROM property_values WHERE import_id = $1', [latest.id]);
     await client.query('DELETE FROM account_snapshots WHERE import_id = $1', [latest.id]);
     await client.query('DELETE FROM imports WHERE id = $1', [latest.id]);
-
     await client.query('COMMIT');
 
     return res.redirect('/data/imports');
   } catch (err) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+
     console.error('POST /imports/rollback-last failed:', err);
     return res.status(500).send(`Rollback failed: ${err.message}`);
   } finally {
