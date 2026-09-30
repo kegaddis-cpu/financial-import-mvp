@@ -1104,7 +1104,72 @@ app.get('/data/imports', async (req, res) => {
     res.status(500).send(`Internal Server Error: ${err.message}`);
   }
 });
+app.get('/imports/:id', async (req, res) => {
+  try {
+    const importId = Number(req.params.id);
 
+    if (!Number.isInteger(importId) || importId <= 0) {
+      return res.status(400).send('Invalid import ID');
+    }
+
+    const importResult = await query(`
+      SELECT *
+      FROM imports
+      WHERE id = $1
+    `, [importId]);
+
+    const importRecord = importResult.rows[0];
+
+    if (!importRecord) {
+      return res.status(404).send('Import not found');
+    }
+
+    const countsResult = await query(`
+      SELECT
+        (
+          SELECT COUNT(*)::int
+          FROM transactions
+          WHERE import_id = $1
+        ) AS transactions,
+        (
+          SELECT COUNT(*)::int
+          FROM account_snapshots
+          WHERE import_id = $1
+        ) AS accounts,
+        (
+          SELECT COUNT(*)::int
+          FROM property_values
+          WHERE import_id = $1
+        ) AS property_values,
+        (
+          SELECT COUNT(*)::int
+          FROM import_issues
+          WHERE import_id = $1
+        ) AS issues
+    `, [importId]);
+
+    const issuesResult = await query(`
+      SELECT
+        issue_type,
+        message,
+        row_number,
+        created_at
+      FROM import_issues
+      WHERE import_id = $1
+      ORDER BY id
+    `, [importId]);
+
+    res.render('import-detail', {
+      importRecord,
+      importId,
+      counts: countsResult.rows[0],
+      issues: issuesResult.rows
+    });
+  } catch (err) {
+    console.error('GET /imports/:id failed:', err);
+    res.status(500).send(`Internal Server Error: ${err.message}`);
+  }
+});
 app.get('/reports/cash-flow', async (req, res) => {
   try {
     const latestImport = await getLatestImport();
