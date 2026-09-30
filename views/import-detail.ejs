@@ -1,294 +1,126 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Import <%= imp.id %></title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 2rem;
-      color: #1f2937;
-      background: #ffffff;
-    }
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Import <%= importId %></title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 960px;
+        margin: 40px auto;
+        padding: 0 16px;
+        color: #222;
+      }
 
-    h1, h2 {
-      margin-bottom: 0.5rem;
-    }
+      h1,
+      h2 {
+        margin-bottom: 8px;
+      }
 
-    p {
-      color: #4b5563;
-    }
+      .card {
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 20px 0;
+      }
 
-    .top-links {
-      display: flex;
-      gap: 1rem;
-      flex-wrap: wrap;
-      margin-bottom: 1rem;
-    }
+      .back-link {
+        color: #111;
+        text-decoration: none;
+      }
 
-    a {
-      color: #2563eb;
-      text-decoration: none;
-    }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 12px;
+        margin-top: 16px;
+      }
 
-    .meta, .summary-grid, .panel {
-      margin-bottom: 1.5rem;
-    }
+      .stat {
+        background: #f7f7f7;
+        border-radius: 8px;
+        padding: 14px;
+      }
 
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-      gap: 1rem;
-    }
+      .label {
+        color: #666;
+        font-size: 13px;
+      }
 
-    .card, .panel {
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      padding: 1rem;
-      background: #fff;
-    }
+      .value {
+        font-size: 24px;
+        font-weight: 700;
+        margin-top: 4px;
+      }
 
-    .card strong {
-      display: block;
-      font-size: 1.4rem;
-      color: #111827;
-      margin-bottom: 0.25rem;
-    }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
 
-    .muted {
-      color: #6b7280;
-    }
+      th,
+      td {
+        border: 1px solid #ddd;
+        padding: 10px;
+        text-align: left;
+        vertical-align: top;
+      }
 
-    .scroll {
-      overflow-x: auto;
-    }
+      th {
+        background: #f3f3f3;
+      }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 0.75rem;
-      min-width: 700px;
-    }
-
-    th, td {
-      border: 1px solid #e5e7eb;
-      padding: 0.7rem;
-      text-align: left;
-      vertical-align: top;
-    }
-
-    th {
-      background: #f3f4f6;
-    }
-
-    td.num, th.num {
-      text-align: right;
-      white-space: nowrap;
-    }
-
-    .issue-badge {
-      display: inline-block;
-      padding: 0.2rem 0.5rem;
-      border-radius: 999px;
-      background: #fef3c7;
-      color: #92400e;
-      font-size: 0.85rem;
-      white-space: nowrap;
-    }
-
-    .ok-empty {
-      color: #6b7280;
-      padding: 0.25rem 0 0;
-    }
-
-    .amount-negative {
-      color: #b91c1c;
-      font-weight: 600;
-    }
-
-    .amount-positive {
-      color: #047857;
-      font-weight: 600;
-    }
-
-    .danger-btn {
-      appearance: none;
-      border: none;
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      background: #b91c1c;
-      color: #ffffff;
-      font-weight: 600;
-      cursor: pointer;
-    }
-
-    .danger-btn:hover {
-      background: #991b1b;
-    }
-  </style>
-</head>
-<body>
-  <div class="top-links">
-    <a href="/">← Back to dashboard</a>
-    <a href="/data/imports">Import history</a>
-    <a href="/expenses/new">Add expense</a>
-    <a href="/sales/new">Record sale</a>
-  </div>
-
-  <h1>Import #<%= imp.id %></h1>
-
-  <div class="meta">
+      .muted {
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
     <p>
-      <strong><%= imp.filename %></strong><br />
-      Imported: <%= imp.imported_at %><br />
-      Parsed rows: <%= imp.row_count %>
+      <a class="back-link" href="/data/imports">← Back to imports</a>
     </p>
-  </div>
 
-  <div class="panel">
-    <h2>Actions</h2>
-    <p class="muted">Use rollback only if this entire import batch should be removed.</p>
-    <form method="post" action="/imports/<%= imp.id %>/rollback" onsubmit="return confirm('Roll back import #<%= imp.id %>? This will permanently delete all rows created by this import.');">
-      <button type="submit" class="danger-btn">Roll back this import</button>
-    </form>
-  </div>
+    <h1>Import #<%= importId %></h1>
 
-  <div class="summary-grid">
     <div class="card">
-      <strong><%= accounts ? accounts.length : 0 %></strong>
-      <span>Account snapshots</span>
-    </div>
-    <div class="card">
-      <strong><%= properties ? properties.length : 0 %></strong>
-      <span>Properties with transactions</span>
-    </div>
-    <div class="card">
-      <strong><%= propertyValues ? propertyValues.length : 0 %></strong>
-      <span>Property values</span>
-    </div>
-    <div class="card">
-      <strong><%= issues ? issues.length : 0 %></strong>
-      <span>Visible issues</span>
-    </div>
-  </div>
+      <p><strong>File:</strong> <%= importRecord.filename %></p>
+      <p><strong>Imported at:</strong> <%= importRecord.imported_at %></p>
+      <p><strong>Rows imported:</strong> <%= importRecord.row_count ?? 0 %></p>
+      <p><strong>Sheets:</strong> <%= importRecord.sheet_count ?? 0 %></p>
 
-  <div class="panel">
-    <h2>Property rollup</h2>
+      <% if (importRecord.notes) { %>
+        <p><strong>Notes:</strong> <%= importRecord.notes %></p>
+      <% } %>
 
-    <% if (properties && properties.length) { %>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Property</th>
-              <th class="num">Transactions</th>
-              <th class="num">Income</th>
-              <th class="num">Expenses</th>
-              <th class="num">Net</th>
-            </tr>
-          </thead>
-          <tbody>
-            <% properties.forEach(function(row) { %>
-              <tr>
-                <td><%= row.property_name || '' %></td>
-                <td class="num"><%= row.txn_count ?? '' %></td>
-                <td class="num amount-positive">
-                  <%= row.income_total == null
-                    ? ''
-                    : Number(row.income_total).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
-                </td>
-                <td class="num amount-negative">
-                  <%= row.expense_total == null
-                    ? ''
-                    : Number(row.expense_total).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
-                </td>
-                <td class="num <%= Number(row.net_total || 0) < 0 ? 'amount-negative' : 'amount-positive' %>">
-                  <%= row.net_total == null
-                    ? ''
-                    : Number(row.net_total).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
-                </td>
-              </tr>
-            <% }) %>
-          </tbody>
-        </table>
+      <div class="stats">
+        <div class="stat">
+          <div class="label">Transactions</div>
+          <div class="value"><%= counts.transactions %></div>
+        </div>
+
+        <div class="stat">
+          <div class="label">Accounts</div>
+          <div class="value"><%= counts.accounts %></div>
+        </div>
+
+        <div class="stat">
+          <div class="label">Property values</div>
+          <div class="value"><%= counts.property_values %></div>
+        </div>
+
+        <div class="stat">
+          <div class="label">Issues</div>
+          <div class="value"><%= counts.issues %></div>
+        </div>
       </div>
-    <% } else { %>
-      <p class="ok-empty">No property rollup available.</p>
-    <% } %>
-  </div>
+    </div>
 
-  <div class="panel">
-    <h2>Account snapshots</h2>
+    <div class="card">
+      <h2>Import issues</h2>
 
-    <% if (accounts && accounts.length) { %>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Account</th>
-              <th class="num">Balance</th>
-              <th>As of</th>
-            </tr>
-          </thead>
-          <tbody>
-            <% accounts.forEach(function(row) { %>
-              <tr>
-                <td><%= row.account_name || row.name || '' %></td>
-                <td class="num">
-                  <%= row.balance == null
-                    ? ''
-                    : Number(row.balance).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
-                </td>
-                <td><%= row.as_of || row.snapshot_date || '' %></td>
-              </tr>
-            <% }) %>
-          </tbody>
-        </table>
-      </div>
-    <% } else { %>
-      <p class="ok-empty">No account snapshots available.</p>
-    <% } %>
-  </div>
-
-  <div class="panel">
-    <h2>Property values</h2>
-
-    <% if (propertyValues && propertyValues.length) { %>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Property</th>
-              <th class="num">Value</th>
-              <th>As of</th>
-            </tr>
-          </thead>
-          <tbody>
-            <% propertyValues.forEach(function(row) { %>
-              <tr>
-                <td><%= row.property_name || '' %></td>
-                <td class="num">
-                  <%= row.property_value == null && row.value == null
-                    ? ''
-                    : Number(row.property_value ?? row.value).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %>
-                </td>
-                <td><%= row.as_of || row.valuation_date || '' %></td>
-              </tr>
-            <% }) %>
-          </tbody>
-        </table>
-      </div>
-    <% } else { %>
-      <p class="ok-empty">No property values available.</p>
-    <% } %>
-  </div>
-
-  <div class="panel">
-    <h2>Issues</h2>
-
-    <% if (issues && issues.length) { %>
-      <div class="scroll">
+      <% if (issues && issues.length) { %>
         <table>
           <thead>
             <tr>
@@ -298,19 +130,18 @@
             </tr>
           </thead>
           <tbody>
-            <% issues.forEach(function(row) { %>
+            <% issues.forEach(function(issue) { %>
               <tr>
-                <td><span class="issue-badge"><%= row.issue_type || row.type || 'Issue' %></span></td>
-                <td><%= row.message || row.issue_message || '' %></td>
-                <td><%= row.row_number ?? row.source_row ?? '' %></td>
+                <td><%= issue.issue_type %></td>
+                <td><%= issue.message %></td>
+                <td><%= issue.row_number ?? '' %></td>
               </tr>
             <% }) %>
           </tbody>
         </table>
-      </div>
-    <% } else { %>
-      <p class="ok-empty">No issues detected.</p>
-    <% } %>
-  </div>
-</body>
+      <% } else { %>
+        <p class="muted">No issues were recorded for this import.</p>
+      <% } %>
+    </div>
+  </body>
 </html>
