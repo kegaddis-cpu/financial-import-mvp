@@ -4,1292 +4,284 @@ const fs = require('fs');
 const { Pool } = require('pg');
 const multer = require('multer');
 const XLSX = require('xlsx');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 const uploadsDir = path.join(__dirname, 'uploads');
 const publicDir = path.join(__dirname, 'public');
 const viewsDir = path.join(__dirname, 'views');
-
-console.log(
-  'DATABASE_URL present:',
-  !!process.env.DATABASE_URL,
-  process.env.DATABASE_URL?.slice(0, 20)
-);
-
-fs.mkdirSync(uploadsDir, { recursive: true });
-fs.mkdirSync(publicDir, { recursive: true });
-fs.mkdirSync(viewsDir, { recursive: true });
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
-});
-
+for (const dir of [uploadsDir, publicDir, viewsDir]) fs.mkdirSync(dir, { recursive: true });
+console.log('DATABASE_URL present:', !!process.env.DATABASE_URL);
+const pool = new Pool({ connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false });
 app.set('views', viewsDir);
 app.set('view engine', 'ejs');
-
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(publicDir));
-
-const upload = multer({
-  dest: uploadsDir,
-  limits: {
-    fileSize: 20 * 1024 * 1024
-  }
-});
-
-async function query(sql, params = []) {
-  return pool.query(sql, params);
-}
-
-function removeUploadedFile(filePath) {
-  if (!filePath) return;
-
-  try {
-    fs.unlinkSync(filePath);
-  } catch (_) {}
-}
-
+const upload = multer({ dest: uploadsDir, limits: { fileSize: 20 * 1024 * 1024 } });
+const query = (sql, params = []) => pool.query(sql, params);
+function removeUploadedFile(filePath) { if (filePath) { try { fs.unlinkSync(filePath); } catch (_) {} } }
 async function initDb() {
-  await query(`
-    CREATE TABLE IF NOT EXISTS imports (
-      id SERIAL PRIMARY KEY,
-      filename TEXT NOT NULL,
-      imported_at TIMESTAMP NOT NULL,
-      sheet_count INTEGER DEFAULT 0,
-      row_count INTEGER DEFAULT 0,
-      notes TEXT
-    );
-  `);
-
-  await query(`
-    CREATE TABLE IF NOT EXISTS account_snapshots (
-      id SERIAL PRIMARY KEY,
-      import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
-      account_name TEXT,
-      balance NUMERIC,
-      as_of TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  await query(`
-    CREATE TABLE IF NOT EXISTS transactions (
-      id SERIAL PRIMARY KEY,
-      import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
-      property_name TEXT,
-      txn_date TEXT,
-      description TEXT,
-      category TEXT,
-      amount NUMERIC,
-      direction TEXT,
-      source_row INTEGER,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      reason TEXT,
-      source_category TEXT,
-      income_amount NUMERIC,
-      expense_amount NUMERIC,
-      year_tag INTEGER,
-      source_sheet TEXT
-    );
-  `);
-
-  await query(`
-    CREATE TABLE IF NOT EXISTS property_values (
-      id SERIAL PRIMARY KEY,
-      import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
-      property_name TEXT,
-      property_value NUMERIC,
-      as_of TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  await query(`
-    CREATE TABLE IF NOT EXISTS import_issues (
-      id SERIAL PRIMARY KEY,
-      import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
-      issue_type TEXT,
-      message TEXT,
-      row_number INTEGER,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
+  await query(`CREATE TABLE IF NOT EXISTS imports (
+    id SERIAL PRIMARY KEY, filename TEXT NOT NULL, imported_at TIMESTAMP NOT NULL,
+    sheet_count INTEGER DEFAULT 0, row_count INTEGER DEFAULT 0, notes TEXT)`);
+  await query(`CREATE TABLE IF NOT EXISTS account_snapshots (
+    id SERIAL PRIMARY KEY, import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+    account_name TEXT, balance NUMERIC, as_of TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await query(`CREATE TABLE IF NOT EXISTS transactions (
+    id SERIAL PRIMARY KEY, import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+    property_name TEXT, txn_date TEXT, description TEXT, category TEXT, amount NUMERIC,
+    direction TEXT, source_row INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reason TEXT, source_category TEXT, income_amount NUMERIC, expense_amount NUMERIC,
+    year_tag INTEGER, source_sheet TEXT)`);
+  await query(`CREATE TABLE IF NOT EXISTS property_values (
+    id SERIAL PRIMARY KEY, import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+    property_name TEXT, property_value NUMERIC, as_of TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
+  await query(`CREATE TABLE IF NOT EXISTS import_issues (
+    id SERIAL PRIMARY KEY, import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+    issue_type TEXT, message TEXT, row_number INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
 }
-
-function toNumber(value) {
-  if (value == null || value === '') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-
-  const raw = String(value).trim();
-  if (!raw) return null;
-
-  const negativeByParens = raw.startsWith('(') && raw.endsWith(')');
-  const cleaned = raw.replace(/[$,()]/g, '').trim();
-
-  if (!cleaned) return null;
-
-  const num = Number(cleaned);
-  if (!Number.isFinite(num)) return null;
-
-  return negativeByParens ? -Math.abs(num) : num;
-}
-
-function normalizeDate(value) {
-  if (value == null || value === '') return null;
-
-  if (typeof value === 'number') {
-    const parsed = XLSX.SSF.parse_date_code(value);
-
-    if (!parsed) return null;
-
-    return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
-  }
-
-  const str = String(value).trim();
-  if (!str) return null;
-
-  const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) return str;
-
-  const usDate = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-
-  if (usDate) {
-    let [, month, day, year] = usDate;
-
-    if (year.length === 2) {
-      year = `20${year}`;
-    }
-
-    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  }
-
-  return null;
-}
-
-function normalizeSheetName(sheetName) {
-  return String(sheetName || '').replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
-function cleanCell(value) {
-  if (value == null) return '';
-  return String(value).replace(/\s+/g, ' ').trim();
-}
-
-function cleanRowArray(row) {
-  return (row || []).map(cleanCell);
-}
-
-function rowHasMeaningfulCell(row) {
-  return Array.isArray(row) && row.some((cell) => cell !== '');
-}
-
-function firstNonEmptyCell(row) {
-  return row.find((cell) => cell !== '') || null;
-}
-
-function findFirstText(row) {
-  for (const cell of row) {
-    if (!cell) continue;
-    if (toNumber(cell) !== null) continue;
-    if (normalizeDate(cell)) continue;
-    return cell;
-  }
-
-  return null;
-}
-
-function findLastNumber(row) {
-  for (let index = row.length - 1; index >= 0; index--) {
-    const number = toNumber(row[index]);
-
-    if (number !== null) {
-      return number;
-    }
-  }
-
-  return null;
-}
-
-function findDateInRow(row) {
-  for (const cell of row) {
-    const date = normalizeDate(cell);
-
-    if (date) {
-      return date;
-    }
-  }
-
-  return null;
-}
-
-function isHeaderOrSectionRow(row) {
-  const values = row
-    .filter(Boolean)
-    .map((value) => String(value).trim());
-
-  if (!values.length) return true;
-
-  const joined = values.join(' ').toLowerCase();
-
-  const skipTerms = [
-    'total',
-    'totals',
-    'subtotal',
-    'sub total',
-    'grand total',
-    'ending balance',
-    'beginning balance',
-    'account summary',
-    'property summary',
-    'notes',
-    'memo',
-    'revenue',
-    'revenues',
-    'expense',
-    'expenses',
-    'income',
-    'date',
-    'description',
-    'category',
-    'amount',
-    'property',
-    'property name',
-    'account',
-    'account name',
-    'balance',
-    'value',
-    'property value'
-  ];
-
-  if (values.length === 1 && skipTerms.includes(joined)) {
-    return true;
-  }
-
-  if (
-    values.length <= 4 &&
-    values.every((value) => {
-      const lower = value.toLowerCase();
-
-      return [
-        'date',
-        'description',
-        'category',
-        'amount',
-        'income',
-        'expense',
-        'revenue',
-        'property',
-        'property name',
-        'account',
-        'account name',
-        'balance',
-        'value',
-        'property value'
-      ].includes(lower);
-    })
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-function detectSheetType(sheetName) {
-  const normalized = normalizeSheetName(sheetName);
-
-  if (normalized.includes('cleanup') || normalized.includes('note')) {
-    return 'ignore';
-  }
-
-  if (normalized.includes('account')) {
-    return 'accounts';
-  }
-
-  if (normalized.includes('property') && normalized.includes('value')) {
-    return 'property_values';
-  }
-
-  if (normalized.includes('revenue') || normalized.includes('expense')) {
-    return 'revenue_expenses';
-  }
-
-  if (normalized.includes('payment')) {
-    return 'payments';
-  }
-
-  return 'unknown';
-}
-
-function inferDirectionAndBuckets(amount, currentSection) {
-  if (amount == null) {
-    return {
-      amount: null,
-      direction: null,
-      incomeAmount: null,
-      expenseAmount: null
-    };
-  }
-
-  if (currentSection === 'revenue') {
-    return {
-      amount: Math.abs(amount),
-      direction: 'inflow',
-      incomeAmount: Math.abs(amount),
-      expenseAmount: null
-    };
-  }
-
-  if (currentSection === 'expense') {
-    return {
-      amount: -Math.abs(amount),
-      direction: 'outflow',
-      incomeAmount: null,
-      expenseAmount: Math.abs(amount)
-    };
-  }
-
-  if (amount < 0) {
-    return {
-      amount,
-      direction: 'outflow',
-      incomeAmount: null,
-      expenseAmount: Math.abs(amount)
-    };
-  }
-
-  return {
-    amount,
-    direction: 'inflow',
-    incomeAmount: Math.abs(amount),
-    expenseAmount: null
-  };
-}
-
-function looksLikeSectionHeading(row) {
-  const values = row.filter(Boolean);
-
-  if (values.length !== 1) return false;
-
-  const normalized = values[0].toLowerCase();
-
-  return [
-    'revenue',
-    'revenues',
-    'income',
-    'expenses',
-    'expense',
-    'operating expenses',
-    'other expenses'
-  ].includes(normalized);
-}
-
-function isLikelyPropertyHeading(row) {
-  const values = row.filter(Boolean);
-
-  if (values.length !== 1) return false;
-
-  const value = values[0];
-
-  if (!value) return false;
-  if (toNumber(value) !== null) return false;
-  if (normalizeDate(value)) return false;
-
-  const lower = value.toLowerCase();
-
-  return ![
-    'revenue',
-    'revenues',
-    'income',
-    'expenses',
-    'expense',
-    'operating expenses',
-    'other expenses',
-    'accounts',
-    'property values'
-  ].includes(lower);
-}
-
-async function insertIssue(importId, issueType, message, rowNumber) {
-  await query(`
-    INSERT INTO import_issues (import_id, issue_type, message, row_number)
-    VALUES ($1, $2, $3, $4)
-  `, [importId, issueType, message, rowNumber]);
-}
-
+async function getLatestImport() { return (await query('SELECT * FROM imports ORDER BY id DESC LIMIT 1')).rows[0] || null; }
+async function getRecentImports(limit = 10) { return (await query('SELECT * FROM imports ORDER BY id DESC LIMIT $1', [limit])).rows; }
 async function getStats() {
-  const importsCount = (await query(`
-    SELECT COUNT(*)::int AS count
-    FROM imports
-  `)).rows[0].count;
-
-  const transactionsCount = (await query(`
-    SELECT COUNT(*)::int AS count
-    FROM transactions
-  `)).rows[0].count;
-
-  const accountCount = (await query(`
-    SELECT COUNT(*)::int AS count
-    FROM account_snapshots
-  `)).rows[0].count;
-
-  const propertyValueCount = (await query(`
-    SELECT COUNT(*)::int AS count
-    FROM property_values
-  `)).rows[0].count;
-
-  const issueCount = (await query(`
-    SELECT COUNT(*)::int AS count
-    FROM import_issues
-  `)).rows[0].count;
-
-  return {
-    importCount: importsCount,
-    transactionCount: transactionsCount,
-    accountCount,
-    propertyValueCount,
-    issueCount,
-    accounts: accountCount,
-    transactions: transactionsCount,
-    properties: propertyValueCount,
-    issues: issueCount
-  };
+  const r = (await query(`SELECT
+    (SELECT COUNT(*)::int FROM imports) AS "importCount",
+    (SELECT COUNT(*)::int FROM transactions) AS "transactionCount",
+    (SELECT COUNT(*)::int FROM account_snapshots) AS "accountCount",
+    (SELECT COUNT(*)::int FROM property_values) AS "propertyValueCount",
+    (SELECT COUNT(*)::int FROM import_issues) AS "issueCount"`)).rows[0];
+  return { ...r, accounts: r.accountCount, transactions: r.transactionCount, properties: r.propertyValueCount, issues: r.issueCount };
 }
-
-async function getLatestImport() {
-  const result = await query(`
-    SELECT *
-    FROM imports
-    ORDER BY id DESC
-    LIMIT 1
-  `);
-
-  return result.rows[0] || null;
-}
-
-async function getRecentImports(limit = 10) {
-  const result = await query(`
-    SELECT *
-    FROM imports
-    ORDER BY id DESC
-    LIMIT $1
-  `, [limit]);
-
-  return result.rows;
-}
-
 async function getLatestImportStats() {
   const latest = await getLatestImport();
-
-  if (!latest) {
-    return {
-      accounts: 0,
-      transactions: 0,
-      properties: 0,
-      propertyValues: 0,
-      issues: 0
-    };
-  }
-
-  const accounts = (await query(`
-    SELECT COUNT(*)::int AS count
-    FROM account_snapshots
-    WHERE import_id = $1
-  `, [latest.id])).rows[0].count;
-
-  const transactions = (await query(`
-    SELECT COUNT(*)::int AS count
-    FROM transactions
-    WHERE import_id = $1
-  `, [latest.id])).rows[0].count;
-
-  const properties = (await query(`
-    SELECT COUNT(DISTINCT property_name)::int AS count
-    FROM transactions
-    WHERE import_id = $1
-      AND property_name IS NOT NULL
-      AND TRIM(property_name) <> ''
-  `, [latest.id])).rows[0].count;
-
-  const propertyValues = (await query(`
-    SELECT COUNT(*)::int AS count
-    FROM property_values
-    WHERE import_id = $1
-  `, [latest.id])).rows[0].count;
-
-  const issues = (await query(`
-    SELECT COUNT(*)::int AS count
-    FROM import_issues
-    WHERE import_id = $1
-  `, [latest.id])).rows[0].count;
-
-  return {
-    accounts,
-    transactions,
-    properties,
-    propertyValues,
-    issues
-  };
+  if (!latest) return { accounts: 0, transactions: 0, properties: 0, propertyValues: 0, issues: 0 };
+  return (await query(`SELECT
+    (SELECT COUNT(*)::int FROM account_snapshots WHERE import_id=$1) AS accounts,
+    (SELECT COUNT(*)::int FROM transactions WHERE import_id=$1) AS transactions,
+    (SELECT COUNT(DISTINCT property_name)::int FROM transactions WHERE import_id=$1 AND TRIM(COALESCE(property_name,''))<>'') AS properties,
+    (SELECT COUNT(*)::int FROM property_values WHERE import_id=$1) AS "propertyValues",
+    (SELECT COUNT(*)::int FROM import_issues WHERE import_id=$1) AS issues`, [latest.id])).rows[0];
 }
-
 async function getAvailableMonths() {
-  const result = await query(`
-    SELECT DISTINCT substr(txn_date, 1, 7) AS month
-    FROM transactions
-    WHERE txn_date IS NOT NULL
-      AND length(txn_date) >= 7
-    ORDER BY month DESC
-  `);
-
-  return result.rows.map((row) => row.month);
+  return (await query(`SELECT DISTINCT substr(txn_date,1,7) AS month FROM transactions
+    WHERE txn_date ~ '^\\d{4}-\\d{2}-\\d{2}$' ORDER BY month DESC`)).rows.map(r=>r.month);
 }
-
-async function getSelectedMonth(requestedMonth) {
+async function getSelectedMonth(requested) {
   const months = await getAvailableMonths();
-
-  if (!months.length) return null;
-  if (requestedMonth && months.includes(requestedMonth)) return requestedMonth;
-
-  return months[0];
+  return months.includes(requested) ? requested : months[0] || null;
 }
-
-async function getMonthlyCashFlow(selectedMonth) {
-  if (!selectedMonth) return [];
-
-  const result = await query(`
-    SELECT
-      property_name,
-      ROUND(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END)::numeric, 2) AS income_total,
-      ROUND(ABS(SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END))::numeric, 2) AS expense_total,
-      ROUND(SUM(amount)::numeric, 2) AS net_total
-    FROM transactions
-    WHERE txn_date IS NOT NULL
-      AND substr(txn_date, 1, 7) = $1
-      AND property_name IS NOT NULL
-      AND TRIM(property_name) <> ''
-    GROUP BY property_name
-    ORDER BY property_name
-  `, [selectedMonth]);
-
-  return result.rows;
+async function getMonthlyCashFlow(month) {
+  if (!month) return [];
+  return (await query(`SELECT property_name,
+    ROUND(SUM(CASE WHEN amount>0 THEN amount ELSE 0 END)::numeric,2) AS income_total,
+    ROUND(SUM(CASE WHEN amount<0 THEN ABS(amount) ELSE 0 END)::numeric,2) AS expense_total,
+    ROUND(SUM(amount)::numeric,2) AS net_total FROM transactions
+    WHERE substr(txn_date,1,7)=$1 AND TRIM(COALESCE(property_name,''))<>''
+    GROUP BY property_name ORDER BY property_name`, [month])).rows;
 }
-
-async function getRecentTransactions(limit = 20) {
-  const result = await query(`
-    SELECT
-      txn_date,
-      property_name,
-      COALESCE(reason, description, '') AS reason,
-      COALESCE(source_category, category, '') AS source_category,
-      amount
-    FROM transactions
-    WHERE txn_date IS NOT NULL
-    ORDER BY txn_date DESC, id DESC
-    LIMIT $1
-  `, [limit]);
-
-  return result.rows;
+async function getRecentTransactions(limit=20) {
+  return (await query(`SELECT txn_date,property_name,COALESCE(reason,description,'') AS reason,
+    COALESCE(source_category,category,'') AS source_category,amount FROM transactions
+    WHERE txn_date IS NOT NULL ORDER BY txn_date DESC,id DESC LIMIT $1`, [limit])).rows;
 }
-
-async function getLatestPropertyValues(limit = 20) {
-  const result = await query(`
-    SELECT
-      property_name AS address,
-      property_value AS estimate,
-      NULL AS profit_loss,
-      as_of AS snapshot_date
-    FROM property_values
-    WHERE property_name IS NOT NULL
-      AND TRIM(property_name) <> ''
-    ORDER BY as_of DESC, id DESC
-    LIMIT $1
-  `, [limit]);
-
-  return result.rows;
+async function getLatestPropertyValues(limit=20) {
+  return (await query(`SELECT property_name AS address,property_value AS estimate,NULL AS profit_loss,
+    as_of AS snapshot_date FROM property_values WHERE TRIM(COALESCE(property_name,''))<>''
+    ORDER BY as_of DESC,id DESC LIMIT $1`, [limit])).rows;
 }
-
-async function getMissingRecurringExpenses(selectedMonth) {
-  if (!selectedMonth) return [];
-
-  const result = await query(`
-    WITH months AS (
-      SELECT
-        $1::text AS selected_month,
-        to_char(
-          to_date($1 || '-01', 'YYYY-MM-DD') - interval '1 month',
-          'YYYY-MM'
-        ) AS prev1,
-        to_char(
-          to_date($1 || '-01', 'YYYY-MM-DD') - interval '2 month',
-          'YYYY-MM'
-        ) AS prev2,
-        to_char(
-          to_date($1 || '-01', 'YYYY-MM-DD') - interval '3 month',
-          'YYYY-MM'
-        ) AS prev3
-    ),
-    prior_dedup AS (
-      SELECT DISTINCT
-        substr(t.txn_date, 1, 7) AS txn_month,
-        TRIM(COALESCE(t.property_name, '')) AS property_name,
-        LOWER(TRIM(COALESCE(t.reason, t.description, ''))) AS normalized_reason,
-        TRIM(COALESCE(t.reason, t.description, '')) AS display_reason
-      FROM transactions t
-      CROSS JOIN months m
-      WHERE t.amount < 0
-        AND t.txn_date IS NOT NULL
-        AND substr(t.txn_date, 1, 7) IN (m.prev1, m.prev2, m.prev3)
-        AND t.property_name IS NOT NULL
-        AND TRIM(t.property_name) <> ''
-        AND COALESCE(t.reason, t.description, '') <> ''
-        AND LOWER(TRIM(t.property_name)) NOT IN (
-          'charity',
-          'car',
-          'insurance',
-          'ethan',
-          'chlo�',
-          'chloe'
-        )
-    ),
-    recurring_candidates AS (
-      SELECT
-        property_name,
-        normalized_reason,
-        MIN(display_reason) AS reason,
-        COUNT(DISTINCT txn_month) AS months_present
-      FROM prior_dedup
-      GROUP BY property_name, normalized_reason
-      HAVING COUNT(DISTINCT txn_month) >= 2
-    ),
-    current_month_dedup AS (
-      SELECT DISTINCT
-        TRIM(COALESCE(property_name, '')) AS property_name,
-        LOWER(TRIM(COALESCE(reason, description, ''))) AS normalized_reason
-      FROM transactions
-      WHERE amount < 0
-        AND txn_date IS NOT NULL
-        AND substr(txn_date, 1, 7) = $1
-        AND property_name IS NOT NULL
-        AND TRIM(property_name) <> ''
-        AND COALESCE(reason, description, '') <> ''
-    ),
-    last_seen AS (
-      SELECT
-        TRIM(COALESCE(property_name, '')) AS property_name,
-        LOWER(TRIM(COALESCE(reason, description, ''))) AS normalized_reason,
-        MAX(txn_date) AS last_seen_date,
-        ROUND(AVG(ABS(amount))::numeric, 2) AS typical_amount
-      FROM transactions
-      WHERE amount < 0
-        AND txn_date IS NOT NULL
-        AND property_name IS NOT NULL
-        AND TRIM(property_name) <> ''
-        AND COALESCE(reason, description, '') <> ''
-      GROUP BY
-        TRIM(COALESCE(property_name, '')),
-        LOWER(TRIM(COALESCE(reason, description, '')))
-    )
-    SELECT
-      rc.property_name,
-      rc.reason,
-      rc.months_present,
-      ls.last_seen_date,
-      ls.typical_amount
-    FROM recurring_candidates rc
-    LEFT JOIN current_month_dedup cm
-      ON cm.property_name = rc.property_name
-     AND cm.normalized_reason = rc.normalized_reason
-    LEFT JOIN last_seen ls
-      ON ls.property_name = rc.property_name
-     AND ls.normalized_reason = rc.normalized_reason
-    WHERE cm.property_name IS NULL
-    ORDER BY rc.property_name, rc.reason
-  `, [selectedMonth]);
-
-  return result.rows;
+async function getMissingRecurringExpenses(month) {
+  if (!month) return [];
+  return (await query(`WITH bounds AS (
+    SELECT to_date($1 || '-01','YYYY-MM-DD') AS start_date
+  ), prior AS (
+    SELECT substr(t.txn_date,1,7) AS txn_month,TRIM(t.property_name) AS property_name,
+      LOWER(TRIM(COALESCE(t.reason,t.description,''))) AS normalized_reason,
+      TRIM(COALESCE(t.reason,t.description,'')) AS display_reason,
+      t.txn_date,ABS(t.amount) AS expense
+    FROM transactions t CROSS JOIN bounds b
+    WHERE t.amount<0 AND t.txn_date >= to_char(b.start_date-interval '3 months','YYYY-MM-DD')
+      AND t.txn_date < to_char(b.start_date,'YYYY-MM-DD')
+      AND TRIM(COALESCE(t.property_name,''))<>'' AND TRIM(COALESCE(t.reason,t.description,''))<>''
+      AND LOWER(TRIM(t.property_name)) NOT IN ('charity','car','insurance','ethan','chloe')
+  ), candidates AS (
+    SELECT property_name,normalized_reason,MIN(display_reason) AS reason,
+      COUNT(DISTINCT txn_month)::int AS months_present,MAX(txn_date) AS last_seen_date,
+      ROUND(AVG(expense)::numeric,2) AS typical_amount
+    FROM prior GROUP BY property_name,normalized_reason HAVING COUNT(DISTINCT txn_month)>=2
+  ) SELECT c.* FROM candidates c WHERE NOT EXISTS (
+    SELECT 1 FROM transactions t WHERE t.amount<0 AND substr(t.txn_date,1,7)=$1
+      AND TRIM(t.property_name)=c.property_name
+      AND LOWER(TRIM(COALESCE(t.reason,t.description,'')))=c.normalized_reason
+  ) ORDER BY c.property_name,c.reason`, [month])).rows;
 }
-
-app.use((req, res, next) => {
-  res.locals.latestImport = null;
-  res.locals.recentImports = [];
-  res.locals.stats = {};
-  res.locals.latestImportStats = {};
-  res.locals.monthlyCashFlow = [];
-  res.locals.accounts = [];
-  res.locals.properties = [];
-  res.locals.propertyValues = [];
-  res.locals.issues = [];
-  res.locals.accountSnapshots = [];
-  res.locals.propertyRollup = [];
-  res.locals.importIssues = [];
-  res.locals.latestIssues = [];
-  res.locals.latestProperties = [];
-  res.locals.portfolioProperties = [];
-  res.locals.recentTransactions = [];
-  res.locals.transactions = [];
-  res.locals.propertiesWithTransactions = [];
-  res.locals.propertyCards = [];
-  res.locals.dashboardCards = [];
-  res.locals.importSummary = {};
-  res.locals.summary = {};
-  res.locals.alerts = [];
-  res.locals.warnings = [];
-  res.locals.errors = [];
-  res.locals.sales = [];
-  res.locals.expenses = [];
-  res.locals.latestPropertyValues = [];
-  res.locals.availableMonths = [];
-  res.locals.selectedMonth = null;
-  res.locals.missingRecurringExpenses = [];
-  next();
+app.use((req,res,next)=>{
+  for (const name of ['recentImports','monthlyCashFlow','accounts','properties','propertyValues','issues',
+    'accountSnapshots','propertyRollup','importIssues','latestIssues','latestProperties','portfolioProperties',
+    'recentTransactions','transactions','propertiesWithTransactions','propertyCards','dashboardCards',
+    'alerts','warnings','errors','sales','expenses','latestPropertyValues','availableMonths','missingRecurringExpenses']) res.locals[name]=[];
+  for (const name of ['stats','latestImportStats','importSummary','summary']) res.locals[name]={};
+  res.locals.latestImport=null; res.locals.selectedMonth=null; next();
 });
+const route = handler => (req,res,next) => Promise.resolve(handler(req,res)).catch(next);
+app.get('/',route(async(req,res)=>{
+  const selectedMonth=await getSelectedMonth(req.query.month);
+  res.render('index',{latestImport:await getLatestImport(),recentImports:await getRecentImports(10),
+    stats:await getStats(),latestImportStats:await getLatestImportStats(),
+    monthlyCashFlow:await getMonthlyCashFlow(selectedMonth),recentTransactions:await getRecentTransactions(20),
+    latestPropertyValues:await getLatestPropertyValues(20),selectedMonth});
+}));
+app.get('/monthly-review',route(async(req,res)=>{
+  const availableMonths=await getAvailableMonths(),selectedMonth=await getSelectedMonth(req.query.month);
+  res.render('monthly-review',{latestImport:await getLatestImport(),stats:await getStats(),availableMonths,selectedMonth,
+    monthlyCashFlow:await getMonthlyCashFlow(selectedMonth),missingRecurringExpenses:await getMissingRecurringExpenses(selectedMonth)});
+}));
+app.get('/setup',route(async(req,res)=>{
+  const latestImport=await getLatestImport();
+  const issues=latestImport ? (await query('SELECT issue_type,message,row_number FROM import_issues WHERE import_id=$1 ORDER BY id',[latestImport.id])).rows : [];
+  res.render('setup',{latestImport,stats:await getStats(),latestImportStats:await getLatestImportStats(),recentImports:await getRecentImports(10),issues});
+}));
 
-app.get('/', async (req, res) => {
-  try {
-    const selectedMonth = await getSelectedMonth(req.query.month);
-
-    res.render('index', {
-      latestImport: await getLatestImport(),
-      recentImports: await getRecentImports(10),
-      stats: await getStats(),
-      latestImportStats: await getLatestImportStats(),
-      monthlyCashFlow: await getMonthlyCashFlow(selectedMonth),
-      recentTransactions: await getRecentTransactions(20),
-      latestPropertyValues: await getLatestPropertyValues(20),
-      selectedMonth
-    });
-  } catch (err) {
-    console.error('GET / failed:', err);
-    res.status(500).send(`Internal Server Error: ${err.message}`);
-  }
-});
-
-app.get('/monthly-review', async (req, res) => {
-  try {
-    const availableMonths = await getAvailableMonths();
-    const selectedMonth = await getSelectedMonth(req.query.month);
-
-    res.render('monthly-review', {
-      latestImport: await getLatestImport(),
-      stats: await getStats(),
-      availableMonths,
-      selectedMonth,
-      monthlyCashFlow: await getMonthlyCashFlow(selectedMonth),
-      missingRecurringExpenses: await getMissingRecurringExpenses(selectedMonth)
-    });
-  } catch (err) {
-    console.error('GET /monthly-review failed:', err);
-    res.status(500).send(`Internal Server Error: ${err.message}`);
-  }
-});
-
-app.get('/setup', async (req, res) => {
-  try {
-    const latestImport = await getLatestImport();
-
-    const issues = latestImport
-      ? (await query(`
-          SELECT issue_type, message, row_number
-          FROM import_issues
-          WHERE import_id = $1
-          ORDER BY id
-        `, [latestImport.id])).rows
-      : [];
-
-    res.render('setup', {
-      latestImport,
-      stats: await getStats(),
-      latestImportStats: await getLatestImportStats(),
-      recentImports: await getRecentImports(10),
-      issues
-    });
-  } catch (err) {
-    console.error('GET /setup failed:', err);
-    res.status(500).send(`Internal Server Error: ${err.message}`);
-  }
-});
-
-app.post('/setup/import', (req, res, next) => {
-  upload.single('workbook')(req, res, (err) => {
-    if (err) {
-      if (err instanceof multer.MulterError) {
-        return res.status(400).send(`Upload error: ${err.message}`);
-      }
-
-      return next(err);
+function installWorkbookImporter(app, { pool, upload, XLSX, removeUploadedFile }) {
+  const text = v => String(v == null ? '' : v).replace(/\s+/g,' ').trim();
+  const num = v => {
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+    const s=text(v); if (!s) return null;
+    const n=Number(s.replace(/[$,()]/g,''));
+    return Number.isFinite(n) ? (/^\(.*\)$/.test(s) ? -Math.abs(n) : n) : null;
+  };
+  function date(v) {
+    let y,m,d;
+    if (typeof v==='number') { const p=XLSX.SSF.parse_date_code(v); if (!p) return null; ({y,m,d}=p); }
+    else {
+      let p=text(v).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (p) [,y,m,d]=p;
+      else { p=text(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/); if (!p) return null;
+        [,m,d,y]=p; if (y.length===2) y=2000+Number(y); }
     }
-
-    return next();
+    y=Number(y);m=Number(m);d=Number(d);
+    const t=new Date(Date.UTC(y,m-1,d));
+    if(t.getUTCFullYear()!==y||t.getUTCMonth()!==m-1||t.getUTCDate()!==d) return null;
+    return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  }
+  app.post('/setup/import',upload.single('workbook'),async(req,res)=>{
+    if(!req.file) return res.status(400).send('No workbook file uploaded');
+    let client;
+    try {
+      const wb=XLSX.readFile(req.file.path,{cellDates:false});
+      client=await pool.connect();await client.query('BEGIN');
+      // Serialize workbook imports so duplicate checks do not race.
+      await client.query('SELECT pg_advisory_xact_lock(7642301)');
+      const id=(await client.query(`INSERT INTO imports(filename,imported_at,sheet_count,row_count,notes)
+        VALUES($1,CURRENT_TIMESTAMP,$2,0,$3) RETURNING id`,[req.file.originalname,wb.SheetNames.length,
+        'Explicit payment columns; ambiguous records held for review; non-payment sheets excluded'])).rows[0].id;
+      const issue=(type,sheet,row,msg)=>client.query(`INSERT INTO import_issues(import_id,issue_type,message,row_number)
+        VALUES($1,$2,$3,$4)`,[id,type,`${sheet}: ${msg}`,row]);
+      let count=0;const seen=new Set();
+      for(const sheet of wb.SheetNames) {
+        const match=text(sheet).match(/^payments\s+(\d{2})$/i);if(!match)continue;
+        const year=2000+Number(match[1]);
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheet],{header:1,raw:true,blankrows:true,range:0,defval:null});
+        const h=rows.findIndex(r=>text(r[0]).toLowerCase()==='date'&&r.some(c=>text(c).toLowerCase()==='amount'));
+        if(h<0){await issue('missing_header',sheet,null,'Required header not found; sheet skipped');continue;}
+        const headers=rows[h].map(v=>text(v).toLowerCase());
+        const dc=headers.indexOf('date'),ac=headers.indexOf('amount'),pc=headers.indexOf('property'),rc=headers.indexOf('reason');
+        if(dc<0||ac<0||rc<0){await issue('missing_header',sheet,h+1,'Date, Amount or Reason missing');continue;}
+        for(let i=h+1;i<rows.length;i++) {
+          const row=rows[i]||[];if(!row.some(v=>text(v)))continue;
+          const dt=date(row[dc]);
+          if(!dt){if(typeof row[dc]==='number'||/^\d/.test(text(row[dc])))await issue('invalid_date',sheet,i+1,`Date unparsed: ${text(row[dc])}; row held`);continue;}
+          const amount=num(row[ac]),reason=text(row[rc]),label=pc<0?'':text(row[pc]),lower=label.toLowerCase();
+          if(/\b(vistazo|sierra|singer)\b/i.test(label+' '+reason))continue;
+          const problems=[];let property=null;
+          if(Number(dt.slice(0,4))!==year)problems.push('date year differs from sheet; original not corrected');
+          if(amount===null)problems.push('invalid or missing Amount');
+          if(!reason)problems.push('missing Reason');
+          if(['fishhawk','fishawk','bridgecrossing','bridgecrossing dr'].includes(lower))property='Bridgecrossing Dr';
+          else if(['carlton fields','carlton fields dr','riverview','riverview rental'].includes(lower))property='Carlton Fields Dr';
+          else if(['blue plume','blue plume ct'].includes(lower))property='Blue Plume Ct';
+          else if(['the boys','riverview boys'].includes(lower)) {
+            if(amount>0&&/\brent\b/i.test(reason))property=dt<'2025-08-01'?'Blue Plume Ct':'Carlton Fields Dr';
+            else problems.push('tenant label on non-rent entry: actual property needs confirmation');
+          } else problems.push('outside confirmed property mapping');
+          if(/^income$/i.test(reason))problems.push('income source unconfirmed');
+          if(/deposit/i.test(reason))problems.push('deposit requires separate classification');
+          const key=JSON.stringify([dt,property||lower,amount,reason.toLowerCase()]);
+          if(seen.has(key))problems.push('possible duplicate within workbook');seen.add(key);
+          if(!problems.length){const existing=await client.query(`SELECT id FROM transactions WHERE txn_date=$1
+            AND property_name=$2 AND amount=$3 AND LOWER(TRIM(COALESCE(reason,description,'')))=$4 LIMIT 1`,
+            [dt,property,amount,reason.toLowerCase()]);if(existing.rows.length)problems.push('possible duplicate already in database');}
+          if(problems.length){await issue('review_required',sheet,i+1,`${problems.join('; ')}. Original: ${JSON.stringify({date:dt,label,amount:row[ac],reason})}`);continue;}
+          await client.query(`INSERT INTO transactions(import_id,property_name,txn_date,description,category,amount,
+            direction,source_row,reason,source_category,income_amount,expense_amount,year_tag,source_sheet)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$4,$5,$9,$10,$11,$12)`,
+            [id,property,dt,reason,amount>0&&/\brent\b/i.test(reason)?'rent':'unclassified',amount,
+            amount<0?'outflow':'inflow',i+1,amount>0?amount:0,amount<0?Math.abs(amount):0,Number(dt.slice(0,4)),sheet]);count++;
+        }
+      }
+      await issue('import_scope','Workbook',null,'Payments only. Accounts, Property Values, Taxes, Cleanup Notes and summary sheets intentionally skipped. Review-required rows are held as issues, not included in totals.');
+      await client.query('UPDATE imports SET row_count=$2 WHERE id=$1',[id,count]);await client.query('COMMIT');
+      res.redirect('/setup');
+    } catch(err) {
+      if(client){try{await client.query('ROLLBACK');}catch(_){}}
+      console.error('Workbook import failed:',err);res.status(500).send('Import failed; database changes rolled back. Check server logs.');
+    } finally {if(client)client.release();removeUploadedFile(req.file.path);}
   });
-}, async (req, res) => {
-  if (!req.file) {
-    return res.status(400).send('No workbook file uploaded');
-  }
+}
 
-  let importId = null;
-  let rowCount = 0;
 
-  try {
-    const workbook = XLSX.readFile(req.file.path, {
-      cellDates: false
-    });
-
-    const importResult = await query(`
-      INSERT INTO imports (
-        filename,
-        imported_at,
-        sheet_count,
-        row_count,
-        notes
-      )
-      VALUES ($1, CURRENT_TIMESTAMP, $2, 0, $3)
-      RETURNING id
-    `, [
-      req.file.originalname,
-      workbook.SheetNames.length,
-      'Imported with array-based worksheet parser'
-    ]);
-
-    importId = importResult.rows[0].id;
-
-    for (const sheetName of workbook.SheetNames) {
-      const sheetType = detectSheetType(sheetName);
-      const worksheet = workbook.Sheets[sheetName];
-
-      if (!worksheet || sheetType === 'ignore') {
-        continue;
-      }
-
-      const rows = XLSX.utils.sheet_to_json(worksheet, {
-        header: 1,
-        raw: false,
-        blankrows: false
-      })
-        .map(cleanRowArray)
-        .filter(rowHasMeaningfulCell);
-
-      let currentSection = null;
-      let currentProperty = null;
-
-      for (let index = 0; index < rows.length; index++) {
-        const row = rows[index];
-        const rowNumber = index + 1;
-        const values = row.filter(Boolean);
-        const joined = values.join(' ').toLowerCase();
-
-        if (!values.length || isHeaderOrSectionRow(row)) {
-          if (looksLikeSectionHeading(row)) {
-            if (
-              joined.includes('revenue') ||
-              joined.includes('income')
-            ) {
-              currentSection = 'revenue';
-            }
-
-            if (
-              joined.includes('expense')
-            ) {
-              currentSection = 'expense';
-            }
-          }
-
-          continue;
-        }
-
-        if (joined === 'revenue' || joined === 'revenues' || joined === 'income') {
-          currentSection = 'revenue';
-          continue;
-        }
-
-        if (
-          joined === 'expense' ||
-          joined === 'expenses' ||
-          joined === 'operating expenses' ||
-          joined === 'other expenses'
-        ) {
-          currentSection = 'expense';
-          continue;
-        }
-
-        if (
-          (sheetType === 'revenue_expenses' || sheetType === 'payments') &&
-          isLikelyPropertyHeading(row)
-        ) {
-          currentProperty = firstNonEmptyCell(row);
-          continue;
-        }
-
-        const firstText = findFirstText(row);
-        const lastNumber = findLastNumber(row);
-        const txnDate = findDateInRow(row);
-
-        if (sheetType === 'accounts') {
-          if (firstText && lastNumber !== null) {
-            await query(`
-              INSERT INTO account_snapshots (
-                import_id,
-                account_name,
-                balance,
-                as_of
-              )
-              VALUES ($1, $2, $3, $4)
-            `, [
-              importId,
-              firstText,
-              lastNumber,
-              txnDate
-            ]);
-
-            rowCount++;
-            continue;
-          }
-
-          continue;
-        }
-
-        if (sheetType === 'property_values') {
-          const propertyName = firstText || currentProperty;
-
-          if (propertyName && lastNumber !== null) {
-            await query(`
-              INSERT INTO property_values (
-                import_id,
-                property_name,
-                property_value,
-                as_of
-              )
-              VALUES ($1, $2, $3, $4)
-            `, [
-              importId,
-              propertyName,
-              lastNumber,
-              txnDate
-            ]);
-
-            rowCount++;
-            continue;
-          }
-
-          continue;
-        }
-
-        if (
-          sheetType === 'revenue_expenses' ||
-          sheetType === 'payments' ||
-          sheetType === 'unknown'
-        ) {
-          const description = firstText;
-          const bucket = inferDirectionAndBuckets(lastNumber, currentSection);
-
-          if (description && bucket.amount !== null) {
-            await query(`
-              INSERT INTO transactions (
-                import_id,
-                property_name,
-                txn_date,
-                description,
-                category,
-                amount,
-                direction,
-                source_row,
-                reason,
-                source_category,
-                income_amount,
-                expense_amount,
-                year_tag,
-                source_sheet
-              )
-              VALUES (
-                $1, $2, $3, $4, $5, $6, $7,
-                $8, $9, $10, $11, $12, $13, $14
-              )
-            `, [
-              importId,
-              currentProperty,
-              txnDate,
-              description,
-              currentSection,
-              bucket.amount,
-              bucket.direction,
-              rowNumber,
-              description,
-              currentSection,
-              bucket.incomeAmount,
-              bucket.expenseAmount,
-              txnDate ? Number(txnDate.slice(0, 4)) : null,
-              sheetName
-            ]);
-
-            rowCount++;
-            continue;
-          }
-
-          /*
-            Do not create an issue for headings, labels, totals, or sparse
-            spreadsheet layout rows. An issue is reserved for a row with an
-            apparent transaction amount that could not be imported.
-          */
-          if (lastNumber !== null && values.length >= 2) {
-            await insertIssue(
-              importId,
-              'unmapped_row',
-              `Could not classify row from sheet "${sheetName}"`,
-              rowNumber
-            );
-          }
-        }
-      }
-    }
-
-    await query(`
-      UPDATE imports
-      SET row_count = $2
-      WHERE id = $1
-    `, [importId, rowCount]);
-
-    removeUploadedFile(req.file.path);
-    res.redirect('/setup');
-  } catch (err) {
-    console.error('POST /setup/import failed:', err);
-
-    if (importId) {
-      try {
-        await query(`
-          DELETE FROM imports
-          WHERE id = $1
-        `, [importId]);
-      } catch (cleanupErr) {
-        console.error('Import rollback failed:', cleanupErr);
-      }
-    }
-
-    removeUploadedFile(req.file.path);
-    res.status(500).send(`Import failed: ${err.message}`);
-  }
+installWorkbookImporter(app, { pool, upload, XLSX, removeUploadedFile });
+app.get('/data/imports',route(async(req,res)=>{
+  const latestImport=await getLatestImport(),imports=await getRecentImports(100);
+  const issues=latestImport ? (await query('SELECT issue_type,message,row_number,created_at FROM import_issues WHERE import_id=$1 ORDER BY id DESC',[latestImport.id])).rows : [];
+  res.render('imports',{latestImport,imports,recentImports:imports,issues,importIssues:issues,
+    stats:await getStats(),latestImportStats:await getLatestImportStats()});
+}));
+app.get('/imports/:id',route(async(req,res)=>{
+  const importId=Number(req.params.id);
+  if (!Number.isInteger(importId)||importId<=0) return res.status(400).send('Invalid import ID');
+  const importRecord=(await query('SELECT * FROM imports WHERE id=$1',[importId])).rows[0];
+  if (!importRecord) return res.status(404).send('Import not found');
+  const counts=(await query(`SELECT
+    (SELECT COUNT(*)::int FROM transactions WHERE import_id=$1) AS transactions,
+    (SELECT COUNT(*)::int FROM account_snapshots WHERE import_id=$1) AS accounts,
+    (SELECT COUNT(*)::int FROM property_values WHERE import_id=$1) AS property_values,
+    (SELECT COUNT(*)::int FROM import_issues WHERE import_id=$1) AS issues`,[importId])).rows[0];
+  const issues=(await query('SELECT issue_type,message,row_number,created_at FROM import_issues WHERE import_id=$1 ORDER BY id',[importId])).rows;
+  res.render('import-detail',{importRecord,importId,counts,issues});
+}));
+app.get('/reports/cash-flow',route(async(req,res)=>{
+  const latestImport=await getLatestImport();
+  if (!latestImport) return res.status(400).send('No imports found');
+  const propertyFilter=String(req.query.property_name||'').trim();
+  const params=[latestImport.id];
+  if (propertyFilter) params.push(propertyFilter);
+  const rows=(await query(`SELECT property_name,substr(txn_date,1,7) AS month,COUNT(*)::int AS txn_count,
+    ROUND(SUM(CASE WHEN amount>0 THEN amount ELSE 0 END)::numeric,2) AS income_total,
+    ROUND(SUM(CASE WHEN amount<0 THEN ABS(amount) ELSE 0 END)::numeric,2) AS expense_total,
+    ROUND(SUM(amount)::numeric,2) AS net_total FROM transactions
+    WHERE import_id=$1 AND TRIM(COALESCE(property_name,''))<>'' AND txn_date IS NOT NULL
+    ${propertyFilter ? 'AND property_name=$2' : ''}
+    GROUP BY property_name,substr(txn_date,1,7) ORDER BY property_name,month`,params)).rows;
+  const properties=(await query(`SELECT DISTINCT property_name FROM transactions WHERE import_id=$1
+    AND TRIM(COALESCE(property_name,''))<>'' ORDER BY property_name`,[latestImport.id])).rows;
+  res.render('cash-flow-report',{latestImportId:latestImport.id,propertyFilter,properties,rows});
+}));
+app.post('/imports/rollback-last',route(async(req,res)=>{
+  const latestImport=await getLatestImport();
+  if (!latestImport) return res.status(400).send('No imports found to roll back');
+  await query('DELETE FROM imports WHERE id=$1',[latestImport.id]);
+  res.redirect('/data/imports');
+}));
+app.get('/health',async(req,res)=>{
+  try { await query('SELECT 1'); res.json({ok:true}); }
+  catch (_) { res.status(500).json({ok:false,error:'Database unavailable'}); }
 });
-
-app.get('/data/imports', async (req, res) => {
-  try {
-    const latestImport = await getLatestImport();
-
-    const imports = await getRecentImports(100);
-
-    const issues = latestImport
-      ? (await query(`
-          SELECT
-            issue_type,
-            message,
-            row_number,
-            created_at
-          FROM import_issues
-          WHERE import_id = $1
-          ORDER BY id DESC
-        `, [latestImport.id])).rows
-      : [];
-
-    res.render('imports', {
-      latestImport,
-      imports,
-      recentImports: imports,
-      issues,
-      importIssues: issues,
-      stats: await getStats(),
-      latestImportStats: await getLatestImportStats()
-    });
-  } catch (err) {
-    console.error('GET /data/imports failed:', err);
-    res.status(500).send(`Internal Server Error: ${err.message}`);
-  }
+app.use((req,res)=>res.status(404).send(`Not found: ${req.method} ${req.originalUrl}`));
+app.use((err,req,res,next)=>{
+  if (req.file) removeUploadedFile(req.file.path);
+  console.error(err);
+  if (err instanceof multer.MulterError) return res.status(400).send(`Upload error: ${err.message}`);
+  res.status(500).send('Internal Server Error. Check server logs.');
 });
-app.get('/imports/:id', async (req, res) => {
-  try {
-    const importId = Number(req.params.id);
-
-    if (!Number.isInteger(importId) || importId <= 0) {
-      return res.status(400).send('Invalid import ID');
-    }
-
-    const importResult = await query(`
-      SELECT *
-      FROM imports
-      WHERE id = $1
-    `, [importId]);
-
-    const importRecord = importResult.rows[0];
-
-    if (!importRecord) {
-      return res.status(404).send('Import not found');
-    }
-
-    const countsResult = await query(`
-      SELECT
-        (
-          SELECT COUNT(*)::int
-          FROM transactions
-          WHERE import_id = $1
-        ) AS transactions,
-        (
-          SELECT COUNT(*)::int
-          FROM account_snapshots
-          WHERE import_id = $1
-        ) AS accounts,
-        (
-          SELECT COUNT(*)::int
-          FROM property_values
-          WHERE import_id = $1
-        ) AS property_values,
-        (
-          SELECT COUNT(*)::int
-          FROM import_issues
-          WHERE import_id = $1
-        ) AS issues
-    `, [importId]);
-
-    const issuesResult = await query(`
-      SELECT
-        issue_type,
-        message,
-        row_number,
-        created_at
-      FROM import_issues
-      WHERE import_id = $1
-      ORDER BY id
-    `, [importId]);
-
-    res.render('import-detail', {
-      importRecord,
-      importId,
-      counts: countsResult.rows[0],
-      issues: issuesResult.rows
-    });
-  } catch (err) {
-    console.error('GET /imports/:id failed:', err);
-    res.status(500).send(`Internal Server Error: ${err.message}`);
-  }
-});
-app.get('/reports/cash-flow', async (req, res) => {
-  try {
-    const latestImport = await getLatestImport();
-
-    if (!latestImport) {
-      return res.status(400).send('No imports found');
-    }
-
-    const propertyFilter = String(req.query.property_name || '').trim();
-    const params = [latestImport.id];
-    let propertyWhere = '';
-
-    if (propertyFilter) {
-      params.push(propertyFilter);
-      propertyWhere = `AND property_name = $${params.length}`;
-    }
-
-    const rowsResult = await query(`
-      SELECT
-        property_name,
-        substr(txn_date, 1, 7) AS month,
-        COUNT(*)::int AS txn_count,
-        ROUND(
-          SUM(
-            COALESCE(
-              income_amount,
-              CASE WHEN amount > 0 THEN amount ELSE 0 END
-            )
-          )::numeric,
-          2
-        ) AS income_total,
-        ROUND(
-          ABS(
-            SUM(
-              COALESCE(
-                expense_amount,
-                CASE WHEN amount < 0 THEN amount ELSE 0 END
-              )
-            )
-          )::numeric,
-          2
-        ) AS expense_total,
-        ROUND(SUM(amount)::numeric, 2) AS net_total
-      FROM transactions
-      WHERE import_id = $1
-        AND property_name IS NOT NULL
-        AND TRIM(property_name) <> ''
-        AND txn_date IS NOT NULL
-        ${propertyWhere}
-      GROUP BY property_name, substr(txn_date, 1, 7)
-      ORDER BY property_name, month
-    `, params);
-
-    const propertiesResult = await query(`
-      SELECT DISTINCT property_name
-      FROM transactions
-      WHERE import_id = $1
-        AND property_name IS NOT NULL
-        AND TRIM(property_name) <> ''
-      ORDER BY property_name
-    `, [latestImport.id]);
-
-    res.render('cash-flow-report', {
-      latestImportId: latestImport.id,
-      propertyFilter,
-      properties: propertiesResult.rows,
-      rows: rowsResult.rows
-    });
-  } catch (err) {
-    console.error('GET /reports/cash-flow failed:', err);
-    res.status(500).send(`Internal Server Error: ${err.message}`);
-  }
-});
-
-app.post('/imports/rollback-last', async (req, res) => {
-  try {
-    const latestImport = await getLatestImport();
-
-    if (!latestImport) {
-      return res.status(400).send('No imports found to roll back');
-    }
-
-    await query(`
-      DELETE FROM imports
-      WHERE id = $1
-    `, [latestImport.id]);
-
-    res.redirect('/data/imports');
-  } catch (err) {
-    console.error('POST /imports/rollback-last failed:', err);
-    res.status(500).send(`Internal Server Error: ${err.message}`);
-  }
-});
-
-app.get('/health', async (req, res) => {
-  try {
-    await query('SELECT 1');
-
-    res.json({
-      ok: true
-    });
-  } catch (err) {
-    res.status(500).json({
-      ok: false,
-      error: err.message
-    });
-  }
-});
-
-app.use((req, res) => {
-  res.status(404).send(`Not found: ${req.method} ${req.originalUrl}`);
-});
-
-initDb()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server listening on port ${PORT}`);
-    });
-  })
-  .catch((err) => {
-    console.error('Database initialization failed:', err);
-    process.exit(1);
-  });
+initDb().then(()=>app.listen(PORT,()=>console.log(`Server listening on port ${PORT}`)))
+  .catch(err=>{console.error('Database initialization failed:',err);process.exit(1);});
