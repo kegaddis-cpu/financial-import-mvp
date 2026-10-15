@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Monthly Cash-Flow by Property</title>
+  <title>Rental Cash Flow | Financial tool</title>
+
   <style>
     :root {
       color-scheme: light dark;
@@ -14,6 +15,7 @@
       --border: #d1d5db;
       --accent: #0f766e;
       --accent-dark: #115e59;
+      --button-text: #ffffff;
       --income: #166534;
       --expense: #b91c1c;
       --net: #1d4ed8;
@@ -29,6 +31,7 @@
         --border: #374151;
         --accent: #14b8a6;
         --accent-dark: #0f766e;
+        --button-text: #042f2e;
         --income: #4ade80;
         --expense: #f87171;
         --net: #60a5fa;
@@ -36,7 +39,9 @@
       }
     }
 
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
     body {
       margin: 0;
@@ -61,7 +66,8 @@
       margin-bottom: 20px;
     }
 
-    .topbar a {
+    .topbar a,
+    .footer-link {
       color: var(--accent);
       text-decoration: none;
       font-weight: 600;
@@ -75,6 +81,42 @@
     .title-wrap p {
       margin: 0;
       color: var(--muted);
+    }
+
+    .navigation {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .navigation a {
+      display: inline-block;
+      padding: 12px 18px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--card);
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .navigation a:hover {
+      border-color: var(--accent);
+      text-decoration: underline;
+    }
+
+    .navigation a[aria-current="page"] {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--button-text);
+    }
+
+    a:focus-visible,
+    button:focus-visible,
+    select:focus-visible {
+      outline: 3px solid var(--net);
+      outline-offset: 3px;
     }
 
     .card {
@@ -121,7 +163,7 @@
 
     button {
       background: var(--accent);
-      color: white;
+      color: var(--button-text);
       cursor: pointer;
       border: none;
       font-weight: 600;
@@ -129,6 +171,7 @@
 
     button:hover {
       background: var(--accent-dark);
+      color: #ffffff;
     }
 
     .summary {
@@ -187,121 +230,203 @@
       font-variant-numeric: tabular-nums;
     }
 
-    .income { color: var(--income); }
-    .expense { color: var(--expense); }
-    .net { color: var(--net); }
+    .income {
+      color: var(--income);
+    }
+
+    .expense {
+      color: var(--expense);
+    }
+
+    .net {
+      color: var(--net);
+    }
 
     .empty {
       color: var(--muted);
       padding: 16px 0 4px;
     }
 
+    .footer-link {
+      display: inline-block;
+      margin: 4px 0 20px;
+    }
+
     @media (max-width: 640px) {
-      .page { padding: 16px; }
-      .title-wrap h1 { font-size: 1.6rem; }
-      .field { min-width: 100%; }
-      button { width: 100%; }
+      .page {
+        padding: 16px;
+      }
+
+      .title-wrap h1 {
+        font-size: 1.6rem;
+      }
+
+      .field {
+        min-width: 100%;
+      }
+
+      button {
+        width: 100%;
+      }
     }
   </style>
 </head>
+
 <body>
-  <div class="page">
-    <div class="topbar">
+  <main class="page">
+    <header class="topbar">
       <div class="title-wrap">
         <h1>Monthly Cash-Flow by Property</h1>
         <p>Latest import ID: <%= latestImportId %></p>
       </div>
+
       <a href="/">&larr; Back to dashboard</a>
-    </div>
+    </header>
+
+    <nav class="navigation" aria-label="Main navigation">
+      <a href="/">Dashboard</a>
+      <a href="/reports/cash-flow" aria-current="page">
+        Rental cash flow
+      </a>
+      <a href="/reports/personal">Personal cash flow</a>
+      <a href="/monthly-review">Monthly review</a>
+      <a href="/data/imports">Imports</a>
+      <a href="/setup">Setup</a>
+    </nav>
 
     <div class="card">
       <form class="filters" method="get" action="/reports/cash-flow">
         <div class="field">
           <label for="property_name">Property</label>
+
           <select id="property_name" name="property_name">
             <option value="">All properties</option>
+
             <% properties.forEach(function(p) { %>
-              <option value="<%= p.property_name %>" <%= propertyFilter === p.property_name ? 'selected' : '' %>>
+              <option
+                value="<%= p.property_name %>"
+                <%= propertyFilter === p.property_name ? 'selected' : '' %>
+              >
                 <%= p.property_name %>
               </option>
-            <% }) %>
+            <% }); %>
           </select>
         </div>
+
         <button type="submit">Apply filter</button>
       </form>
     </div>
 
     <%
       const totalMonths = rows.length;
-      const totalTransactions = rows.reduce((sum, r) => sum + Number(r.txn_count || 0), 0);
-      const totalIncome = rows.reduce((sum, r) => sum + Number(r.income_total || 0), 0);
-      const totalExpenses = rows.reduce((sum, r) => sum + Number(r.expense_total || 0), 0);
-      const totalNet = rows.reduce((sum, r) => sum + Number(r.net_total || 0), 0);
-      const propertyCount = new Set(rows.map(r => r.property_name)).size;
+
+      const totalTransactions = rows.reduce(
+        (sum, r) => sum + Number(r.txn_count || 0),
+        0
+      );
+
+      const totalIncome = rows.reduce(
+        (sum, r) => sum + Number(r.income_total || 0),
+        0
+      );
+
+      const totalExpenses = rows.reduce(
+        (sum, r) => sum + Number(r.expense_total || 0),
+        0
+      );
+
+      const totalNet = rows.reduce(
+        (sum, r) => sum + Number(r.net_total || 0),
+        0
+      );
+
+      const propertyCount = new Set(
+        rows.map(r => r.property_name)
+      ).size;
+
       function money(v) {
-        return Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return Number(v || 0).toLocaleString(undefined, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        });
       }
     %>
 
-    <div class="summary">
+    <section class="summary" aria-label="Rental cash-flow summary">
       <div class="metric">
         <div class="label">Properties</div>
         <div class="value"><%= propertyCount %></div>
       </div>
+
       <div class="metric">
         <div class="label">Property-month rows</div>
         <div class="value"><%= totalMonths %></div>
       </div>
+
       <div class="metric">
         <div class="label">Transactions</div>
         <div class="value"><%= totalTransactions %></div>
       </div>
+
       <div class="metric">
         <div class="label">Income</div>
         <div class="value income"><%= money(totalIncome) %></div>
       </div>
+
       <div class="metric">
         <div class="label">Expenses</div>
         <div class="value expense"><%= money(totalExpenses) %></div>
       </div>
+
       <div class="metric">
         <div class="label">Net</div>
         <div class="value net"><%= money(totalNet) %></div>
       </div>
-    </div>
+    </section>
 
     <div class="card">
       <% if (!rows.length) { %>
-        <div class="empty">No cash-flow rows found for the selected filter.</div>
+        <div class="empty">
+          No cash-flow rows found for the selected filter.
+        </div>
       <% } else { %>
         <div class="table-wrap">
-          <table>
+          <table aria-label="Monthly rental cash flow by property">
             <thead>
               <tr>
-                <th>Property</th>
-                <th>Month</th>
-                <th>Transactions</th>
-                <th>Income</th>
-                <th>Expenses</th>
-                <th>Net</th>
+                <th scope="col">Property</th>
+                <th scope="col">Month</th>
+                <th scope="col">Transactions</th>
+                <th scope="col">Income</th>
+                <th scope="col">Expenses</th>
+                <th scope="col">Net</th>
               </tr>
             </thead>
+
             <tbody>
               <% rows.forEach(function(r) { %>
                 <tr>
                   <td><%= r.property_name %></td>
                   <td><%= r.month %></td>
                   <td class="num"><%= r.txn_count %></td>
-                  <td class="num income"><%= money(r.income_total) %></td>
-                  <td class="num expense"><%= money(r.expense_total) %></td>
-                  <td class="num net"><%= money(r.net_total) %></td>
+                  <td class="num income">
+                    <%= money(r.income_total) %>
+                  </td>
+                  <td class="num expense">
+                    <%= money(r.expense_total) %>
+                  </td>
+                  <td class="num net">
+                    <%= money(r.net_total) %>
+                  </td>
                 </tr>
-              <% }) %>
+              <% }); %>
             </tbody>
           </table>
         </div>
       <% } %>
     </div>
-  </div>
+
+    <a class="footer-link" href="/">&larr; Back to Dashboard</a>
+  </main>
 </body>
 </html>
