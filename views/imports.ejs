@@ -1,19 +1,181 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Imports</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Imports | Financial tool</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #ffffff;
+      color: #1f2937;
+      font-family: Arial, sans-serif;
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 36px;
+    }
+
+    .intro {
+      margin: 0 0 24px;
+      color: #4b5563;
+    }
+
+    .navigation {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+
+    .navigation a {
+      display: inline-block;
+      padding: 12px 18px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      color: #111827;
+      background: #ffffff;
+      text-decoration: none;
+    }
+
+    .navigation a:hover {
+      background: #f3f4f6;
+    }
+
+    .navigation a[aria-current="page"] {
+      border-color: #111827;
+      background: #111827;
+      color: #ffffff;
+    }
+
+    a:focus-visible {
+      outline: 3px solid #2563eb;
+      outline-offset: 3px;
+    }
+
+    .panel {
+      padding: 24px;
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+    }
+
+    .panel h2 {
+      margin-top: 0;
+    }
+
+    .import-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .import-list li {
+      padding: 18px 0;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .import-list li:last-child {
+      border-bottom: none;
+    }
+
+    .import-link {
+      color: #1d4ed8;
+      font-size: 18px;
+      overflow-wrap: anywhere;
+    }
+
+    .details {
+      margin-top: 6px;
+      color: #6b7280;
+      font-size: 14px;
+    }
+
+    .empty-state {
+      color: #4b5563;
+    }
+
+    .footer-link {
+      display: inline-block;
+      margin-top: 24px;
+      color: #1d4ed8;
+    }
+  </style>
 </head>
+
 <body>
-  <h1>Imports</h1>
-  <ul>
-    <% recentImports.forEach(function(imp) { %>
-      <li>
-        <a href="/imports/<%= imp.id %>">
-          <%= imp.filename %>
-        </a>
-      </li>
-    <% }) %>
-  </ul>
+  <main class="container">
+    <h1>Imports</h1>
+
+    <p class="intro">
+      Review workbook imports and open an import to inspect its results.
+      Upload and rollback actions are on Setup.
+    </p>
+
+    <nav class="navigation" aria-label="Main navigation">
+      <a href="/">Dashboard</a>
+      <a href="/reports/cash-flow">Rental cash flow</a>
+      <a href="/reports/personal">Personal cash flow</a>
+      <a href="/monthly-review">Monthly review</a>
+      <a href="/data/imports" aria-current="page">Imports</a>
+      <a href="/setup">Setup</a>
+    </nav>
+
+    <section class="panel" aria-labelledby="import-history-heading">
+      <h2 id="import-history-heading">Import history</h2>
+
+      <p>
+        Imports listed: <%= recentImports.length %>
+      </p>
+
+      <% if (recentImports.length === 0) { %>
+        <p class="empty-state">
+          No imports found. Go to
+          <a href="/setup">Setup</a>
+          when you are ready to upload a workbook.
+        </p>
+      <% } else { %>
+        <ul class="import-list">
+          <% recentImports.forEach(function(imp) { %>
+            <li>
+              <a class="import-link" href="/imports/<%= imp.id %>">
+                <%= imp.filename %>
+              </a>
+
+              <div class="details">
+                Import ID: <%= imp.id %>
+
+                <% if (imp.imported_at) { %>
+                  · Imported:
+                  <%= new Date(imp.imported_at).toLocaleString('en-US', {
+                    timeZone: 'America/New_York',
+                    timeZoneName: 'short'
+                  }) %>
+                <% } %>
+
+                <% if (imp.row_count != null) { %>
+                  · Imported records: <%= imp.row_count %>
+                <% } %>
+              </div>
+            </li>
+          <% }); %>
+        </ul>
+      <% } %>
+    </section>
+
+    <a class="footer-link" href="/">← Back to Dashboard</a>
+  </main>
 </body>
 </html>
