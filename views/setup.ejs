@@ -3,14 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Setup</title>
+    <title>Setup | Financial tool</title>
+
     <style>
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         font-family: Arial, sans-serif;
-        max-width: 960px;
+        max-width: 1100px;
         margin: 40px auto;
-        padding: 0 16px;
-        color: #222;
+        padding: 0 20px;
+        color: #1f2937;
+        background: #fff;
+        line-height: 1.5;
       }
 
       h1,
@@ -18,8 +25,46 @@
         margin-bottom: 8px;
       }
 
+      h1 {
+        margin-top: 0;
+      }
+
       p {
         line-height: 1.5;
+      }
+
+      .navigation {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 24px 0 28px;
+      }
+
+      .navigation a {
+        display: inline-block;
+        padding: 12px 18px;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        color: #111827;
+        background: #fff;
+        text-decoration: none;
+      }
+
+      .navigation a:hover {
+        background: #f3f4f6;
+      }
+
+      .navigation a[aria-current="page"] {
+        border-color: #111827;
+        background: #111827;
+        color: #fff;
+      }
+
+      a:focus-visible,
+      button:focus-visible,
+      input:focus-visible {
+        outline: 3px solid #2563eb;
+        outline-offset: 3px;
       }
 
       .card {
@@ -27,6 +72,10 @@
         border-radius: 10px;
         padding: 20px;
         margin: 20px 0;
+      }
+
+      .card h2:first-child {
+        margin-top: 0;
       }
 
       .btn {
@@ -38,6 +87,7 @@
         background: #f7f7f7;
         color: #111;
         cursor: pointer;
+        font: inherit;
       }
 
       .btn-primary {
@@ -60,10 +110,18 @@
         margin-top: 12px;
       }
 
+      .upload-form input[type="file"] {
+        max-width: 100%;
+      }
+
       .danger-zone {
         margin-top: 18px;
         padding-top: 16px;
         border-top: 1px solid #eee;
+      }
+
+      .table-wrapper {
+        overflow-x: auto;
       }
 
       table {
@@ -77,6 +135,7 @@
         border: 1px solid #ddd;
         padding: 10px;
         text-align: left;
+        vertical-align: top;
       }
 
       th {
@@ -88,104 +147,177 @@
       }
 
       .import-link {
-        color: #111;
+        color: #1d4ed8;
         font-weight: 700;
+      }
+
+      .footer-link {
+        display: inline-block;
+        margin: 8px 0 32px;
+        color: #1d4ed8;
+      }
+
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
       }
     </style>
   </head>
+
   <body>
-    <h1>Financial workbook setup</h1>
-    <p>Use this page to upload your workbook and review recent imports.</p>
+    <main>
+      <h1>Financial workbook setup</h1>
+      <p>Use this page to upload your workbook and review recent imports.</p>
 
-    <div class="card">
-      <h2>Upload workbook</h2>
-      <p class="muted">
-        Choose your Excel workbook to seed or refresh your financial data.
-      </p>
+      <nav class="navigation" aria-label="Main navigation">
+        <a href="/">Dashboard</a>
+        <a href="/reports/cash-flow">Rental cash flow</a>
+        <a href="/reports/personal">Personal cash flow</a>
+        <a href="/monthly-review">Monthly review</a>
+        <a href="/data/imports">Imports</a>
+        <a href="/setup" aria-current="page">Setup</a>
+      </nav>
 
-      <form
-        action="/setup/import"
-        method="post"
-        enctype="multipart/form-data"
-        class="upload-form"
-      >
-        <input
-          type="file"
-          name="workbook"
-          accept=".xlsx,.xls"
-          required
-        />
-        <button class="btn btn-primary" type="submit">Upload workbook</button>
-      </form>
+      <section class="card" aria-labelledby="upload-heading">
+        <h2 id="upload-heading">Upload workbook</h2>
 
-      <div class="danger-zone">
-        <h2>Rollback</h2>
         <p class="muted">
-          Delete all data tied to the most recent import.
+          Choose your Excel workbook to import financial records.
+          Uploading does not automatically replace earlier imports.
         </p>
 
         <form
-          action="/imports/rollback-last"
+          action="/setup/import"
           method="post"
-          onsubmit="return confirm('Roll back the most recent import? This cannot be undone.');"
+          enctype="multipart/form-data"
+          class="upload-form"
         >
-          <button class="btn btn-danger" type="submit">
-            Roll back last import
+          <label class="visually-hidden" for="workbook">
+            Excel workbook
+          </label>
+
+          <input
+            id="workbook"
+            type="file"
+            name="workbook"
+            accept=".xlsx,.xls"
+            required
+          />
+
+          <button class="btn btn-primary" type="submit">
+            Upload workbook
           </button>
         </form>
-      </div>
-    </div>
 
-    <div class="card">
-      <h2>Latest import</h2>
+        <div class="danger-zone">
+          <h2>Rollback</h2>
 
-      <% if (typeof latestImport !== 'undefined' && latestImport) { %>
-        <p>
-          <strong>Import:</strong>
-          <a class="import-link" href="/imports/<%= latestImport.id %>">
-            #<%= latestImport.id %>
-          </a>
-        </p>
-        <p><strong>File:</strong> <%= latestImport.filename %></p>
-        <p><strong>Imported at:</strong> <%= latestImport.imported_at %></p>
-        <p><strong>Rows:</strong> <%= latestImport.row_count ?? 0 %></p>
-        <p><strong>Sheets:</strong> <%= latestImport.sheet_count ?? 0 %></p>
-      <% } else { %>
-        <p class="muted">No imports yet.</p>
-      <% } %>
-    </div>
+          <p class="muted">
+            Delete all data tied to the most recent import.
+            Your original Excel workbook is not changed.
+          </p>
 
-    <div class="card">
-      <h2>Recent imports</h2>
+          <form
+            action="/imports/rollback-last"
+            method="post"
+            onsubmit="return confirm('Roll back the most recent import? This deletes its imported database records and cannot be undone. Your original workbook will not be changed.');"
+          >
+            <button class="btn btn-danger" type="submit">
+              Roll back last import
+            </button>
+          </form>
+        </div>
+      </section>
 
-      <% if (typeof recentImports !== 'undefined' && recentImports && recentImports.length) { %>
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Filename</th>
-              <th>Imported at</th>
-              <th>Rows</th>
-            </tr>
-          </thead>
-          <tbody>
-            <% recentImports.forEach(function(item) { %>
-              <tr>
-                <td>
-                  <a class="import-link" href="/imports/<%= item.id %>">
-                    #<%= item.id %>
-                  </a>
-                </td>
-                <td><%= item.filename %></td>
-                <td><%= item.imported_at %></td>
-                <td><%= item.row_count ?? 0 %></td>
-              </tr>
-            <% }) %>
-          </tbody>
-        </table>
-      <% } else { %>
-        <p class="muted">No recent imports to display.</p>
-      <% } %>
-    </div>
+      <section class="card" aria-labelledby="latest-import-heading">
+        <h2 id="latest-import-heading">Latest import</h2>
+
+        <% if (typeof latestImport !== 'undefined' && latestImport) { %>
+          <p>
+            <strong>Import:</strong>
+            <a class="import-link" href="/imports/<%= latestImport.id %>">
+              #<%= latestImport.id %>
+            </a>
+          </p>
+
+          <p>
+            <strong>File:</strong>
+            <%= latestImport.filename %>
+          </p>
+
+          <p>
+            <strong>Imported at:</strong>
+            <%= latestImport.imported_at %>
+          </p>
+
+          <p>
+            <strong>Rows:</strong>
+            <%= latestImport.row_count ?? 0 %>
+          </p>
+
+          <p>
+            <strong>Sheets:</strong>
+            <%= latestImport.sheet_count ?? 0 %>
+          </p>
+
+          <p>
+            <a href="/imports/<%= latestImport.id %>">
+              View import details and issues
+            </a>
+          </p>
+        <% } else { %>
+          <p class="muted">No imports yet.</p>
+        <% } %>
+      </section>
+
+      <section class="card" aria-labelledby="recent-imports-heading">
+        <h2 id="recent-imports-heading">Recent imports</h2>
+
+        <% if (
+          typeof recentImports !== 'undefined' &&
+          recentImports &&
+          recentImports.length
+        ) { %>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">ID</th>
+                  <th scope="col">Filename</th>
+                  <th scope="col">Imported at</th>
+                  <th scope="col">Rows</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                <% recentImports.forEach(function(item) { %>
+                  <tr>
+                    <td>
+                      <a class="import-link" href="/imports/<%= item.id %>">
+                        #<%= item.id %>
+                      </a>
+                    </td>
+                    <td><%= item.filename %></td>
+                    <td><%= item.imported_at %></td>
+                    <td><%= item.row_count ?? 0 %></td>
+                  </tr>
+                <% }); %>
+              </tbody>
+            </table>
+          </div>
+        <% } else { %>
+          <p class="muted">No recent imports to display.</p>
+        <% } %>
+      </section>
+
+      <a class="footer-link" href="/">← Back to Dashboard</a>
+    </main>
   </body>
 </html>
