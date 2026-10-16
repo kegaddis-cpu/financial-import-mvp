@@ -220,6 +220,7 @@ async function saveLedger(req,res,editing){
 app.post('/api/ledger',route((req,res)=>saveLedger(req,res,false)));
 app.put('/api/ledger/:id',route((req,res)=>saveLedger(req,res,true)));
 
+require('./schedules')(app, pool);
 app.use((req,res)=>res.status(404).send(`Not found: ${req.method} ${req.originalUrl}`));
 app.use((err,req,res,next)=>{if(req.file)removeUploadedFile(req.file.path);console.error(err);if(err instanceof multer.MulterError)return res.status(400).send(`Upload error: ${err.message}`);res.status(500).send('Internal Server Error. Check server logs.');});
 if(require.main===module){initDb().then(()=>app.listen(PORT,()=>console.log(`Server listening on port ${PORT}`))).catch(err=>{console.error('Database initialization failed:',err);process.exit(1);});}
