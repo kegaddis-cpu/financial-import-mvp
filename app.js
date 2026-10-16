@@ -221,6 +221,57 @@ app.post('/api/ledger',route((req,res)=>saveLedger(req,res,false)));
 app.put('/api/ledger/:id',route((req,res)=>saveLedger(req,res,true)));
 
 require('./schedules')(app, pool);
+// Read-only diagnostic: does not insert, update, or delete anything.
+app.get('/debug/bridgecrossing-rent', async (req, res, next) => {
+  try {
+    const result = await query(`
+      SELECT
+        id,
+        import_id,
+        property_name,
+        txn_date,
+        description,
+        reason,
+        amount,
+        category,
+        finance_scope
+      FROM public.transactions
+      WHERE (
+        property_name ILIKE '%bridgecrossing%'
+        OR original_label ILIKE '%bridgecrossing%'
+        OR original_label ILIKE '%fishhawk%'
+        OR original_label ILIKE '%fishawk%'
+      )
+      AND txn_date >= '2026-01-01'
+      AND txn_date < '2027-01-01'
+      AND amount > 0
+      ORDER BY txn_date, id
+    `);
+
+    const rows = result.rows;
+    const monthsWithIncome = new Set(
+      rows.map(row => String(row.txn_date).slice(0, 7))
+    );
+
+    const missingMonths = Array.from({ length: 10 }, (_, index) =>
+      `2026-${String(index + 1).padStart(2, '0')}`
+    ).filter(month => !monthsWithIncome.has(month));
+
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      readOnly: true,
+      note:
+        'Positive transactions are shown for inspection; ' +
+        'they are not automatically classified as rent. ' +
+        'Missing months do not prove rent was received or owed.',
+      checkedMonths: 'January through October 2026',
+      monthsWithoutPositiveTransactions: missingMonths,
+      positiveTransactions: rows
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 app.use((req,res)=>res.status(404).send(`Not found: ${req.method} ${req.originalUrl}`));
 app.use((err,req,res,next)=>{if(req.file)removeUploadedFile(req.file.path);console.error(err);if(err instanceof multer.MulterError)return res.status(400).send(`Upload error: ${err.message}`);res.status(500).send('Internal Server Error. Check server logs.');});
 if(require.main===module){initDb().then(()=>app.listen(PORT,()=>console.log(`Server listening on port ${PORT}`))).catch(err=>{console.error('Database initialization failed:',err);process.exit(1);});}
